@@ -1,5 +1,19 @@
 # Benchmark Results
 
+> **These figures are illustrative estimates, not measurements.**
+>
+> The numbers below were written by hand as expected magnitudes (`~5,000` gas per
+> event, `~0.5s` per 1,000 events) before a benchmark suite existed to produce
+> them. Nothing in this file was read back from a host meter, and the
+> "Methodology" section it originally carried described a measurement process that
+> was not performed. Treat every table here as a rough sense of scale and nothing
+> more.
+>
+> For numbers that are actually measured, see
+> [Contract benchmark methodology](benchmark-methodology.md) and the
+> `tools/contract-bench` suite. Where the two disagree, the suite is right and
+> this file is a guess.
+
 ## Methodology
 
 - Tests run in the Soroban test environment (not on a live network)
