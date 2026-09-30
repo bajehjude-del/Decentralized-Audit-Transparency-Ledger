@@ -52,9 +52,10 @@ pub struct ProductSKU {
     pub brand_id: Symbol,                    // Associated brand
     pub product_name: Bytes,                 // Product name
     pub description: Bytes,                  // Product description
-    pub provenance_id: BytesN<32>,           // Link to origin event
-    pub certifications: Vec<BytesN<32>>,     // Links to certifications
-    pub labor_reports: Vec<BytesN<32>>,      // Links to labor audits
+    pub provenance_id: BytesN<32>,
+           // Link to origin event
+    pub certifications: Vec<BytesN <32>>,     // Links to certifications
+    pub labor_reports: Vec<BytesN <32>>,      // Links to labor audits
     pub environmental_reports: Vec<BytesN<32>>, // Links to environmental reports
     pub created_date: u64,                   // When tracked
     pub last_updated: u64,                   // Last modification
@@ -80,7 +81,7 @@ pub struct CustodyTransfer {
     pub from_address: Address,              // Sender
     pub to_address: Address,                // Recipient
     pub timestamp: u64,                     // When transferred
-    pub location: Location,                 // Transfer location
+    pub location: Location,                // Transfer location
     pub transfer_notes: Bytes,              // Transfer details
 }
 ```
@@ -98,7 +99,7 @@ pub struct Certification {
     pub expiry_date: u64,                  // Expiration date
     pub scope: Bytes,                      // What is certified
     pub is_active: bool,                   // Current status
-    pub verification_hash: BytesN<32>,     // Proof of certification
+    pub verification_hash: BytesN <32>,      // Proof of certification
     pub audit_trail: Vec<AuditEntry>,      // Audit history
 }
 ```
@@ -111,15 +112,15 @@ Worker welfare and compliance audit:
 pub struct LaborConditions {
     pub facility_id: Bytes,                 // Which facility
     pub report_date: u64,                   // When audited
-    pub reporter: Address,                  // Auditing organization
+    pub reporter: Address,                   // Auditing organization
     pub worker_count: u32,                  // Number of workers
     pub wage_compliance: bool,              // Wages meet minimums
     pub working_hours_compliance: bool,     // Hours within legal limits
     pub child_labor_free: bool,             // No child labor
     pub safety_standards_met: bool,         // Safety compliant
     pub freedom_of_association: bool,       // Union rights protected
-    pub report_hash: BytesN<32>,            // Detailed report hash
-    pub certifications: Vec<Bytes>,         // Associated certifications
+    pub report_hash: BytesN <32>,            // Detailed report hash
+    pub certifications: Vec<Bytes>,          // Associated certifications
 }
 ```
 
@@ -132,12 +133,12 @@ pub struct EnvironmentalImpact {
     pub facility_id: Bytes,                 // Which facility
     pub report_period: (u64, u64),          // Start and end dates
     pub carbon_footprint: u32,              // kg CO2e
-    pub water_usage: u32,                   // Liters used
+    pub water_usage: u32,                  // Liters used
     pub waste_generated: u32,               // kg of waste
     pub renewable_energy_percent: u32,      // % renewable
     pub emissions_reduction_percent: u32,   // Year-over-year improvement
-    pub certifications: Vec<Bytes>,         // Environmental certs
-    pub report_hash: BytesN<32>,            // Detailed report hash
+    pub certifications: Vec<Bytes>,          // Environmental certs
+    pub report_hash: BytesN <32>            // Detailed report hash
 }
 ```
 
@@ -224,7 +225,7 @@ pub fn log_provenance_event(
 **Parameters:**
 - `event_id` — Unique event identifier (hash)
 - `origin_location` — Factory/origin facility details
-- `raw_material_source` — Source of raw materials
+- `raw_material_source` — Details of raw material source
 - `producer` — Producer's Stellar address (must authenticate)
 - `batch_id` — Batch or lot number
 
@@ -235,7 +236,7 @@ Record a transfer of ownership/custody in the supply chain.
 ```rust
 pub fn log_custody_transfer(
     env: &Env,
-    event_id: BytesN<32>,
+    event_id: BytesN <32>,
     from: Address,
     to: Address,
     location: Location,
@@ -295,7 +296,7 @@ pub fn log_labor_conditions(
 - `facility_id` — Which facility was audited
 - `worker_count` — Number of workers
 - `wage_compliant` — Wages meet legal minimums
-- `hours_compliant` — Working hours within legal limits
+- `hours_compliant` — working hours within legal limits
 - `child_labor_free` — No child labor present
 - `safety_met` — Safety standards met
 - `freedom_of_association` — Union rights protected
@@ -324,13 +325,13 @@ pub fn log_environmental_impact(
 
 **Parameters:**
 - `facility_id` — Which facility was audited
-- `report_period_start` — Report period start timestamp
-- `report_period_end` — Report period end timestamp
-- `carbon_footprint` — Carbon footprint in kg CO2e
-- `water_usage` — Water usage in liters
-- `waste_generated` — Waste in kg
-- `renewable_energy_percent` — Percentage of renewable energy (0-100)
-- `emissions_reduction` — Year-over-year reduction percentage
+- `report_period_start` — report period start timestamp
+- `report_period_end` — report period end timestamp
+- `carbon_footprint` — carbon footprint in kg CO2e
+- `water_usage` — water usage in liters
+- `waste_generated` — waste in kg
+- `renewable_energy_percent` — percentage of renewable energy (0-100)
+- `emissions_reduction` — year-over-year reduction percentage
 - `report_hash` — SHA-256 of detailed environmental report
 - `reporter` — Environmental auditor organization (must authenticate)
 
@@ -396,175 +397,90 @@ Get a consumer-friendly timeline of product events.
 ```rust
 pub fn get_product_timeline(
     env: &Env,
-    event_ids: Vec<BytesN<32>>,
-) -> Vec<TimelineEntry>
-```
-
-**Returns:**
-```rust
-pub struct TimelineEntry {
-    pub timestamp: u64,
-    pub entry_type: Symbol,     // origin, custody, certification, etc.
-    pub location: Option<Location>,
-    pub description: Bytes,
-    pub verified: bool,
-    pub event_id: BytesN<32>,
-}
-```
-
-#### get_brand_integrity_report()
-
-Generate a brand integrity report showing overall compliance and transparency.
-
-```rust
-pub fn get_brand_integrity_report(
-    env: &Env,
-    brand_id: Symbol,
-) -> BrandIntegrityReport
-```
-
-**Returns:**
-```rust
-pub struct BrandIntegrityReport {
-    pub brand_id: Symbol,
-    pub report_date: u64,
-    pub total_products_tracked: u32,
-    pub avg_compliance_score: u32,      // 0-100
-    pub certifications_count: u32,
-    pub facilities_audited: u32,
-    pub products_fully_traceable: u32,
-    pub products_verified: u32,
-    pub quality_issues: u32,
-    pub compliance_trend: Symbol,       // improving, stable, declining
-}
-```
-
-### Utility Functions
-
-#### generate_qr_code_url()
-
-Generate a QR code URL for product verification.
-
-```rust
-pub fn generate_qr_code_url(
-    env: &Env,
     brand_id: Symbol,
     sku: Bytes,
-    base_url: Bytes,
-) -> Bytes
+) -> Vec<TimelineEvent>
 ```
 
-**Returns:** URL that can be encoded as QR code
+**Parameters:**
+- `brand_id` — Associated brand ID
+- `sku` — Product SKU/UPC code
 
-#### generate_integrity_proof()
+**Returns:** A list of `TimelineEvent` entries containing the event type, timestamp, and associated data hash.
 
-Generate a cryptographic proof of supply chain integrity.
+## Supply Chain Security
 
-```rust
-pub fn generate_integrity_proof(
-    env: &Env,
-    event_ids: Vec<BytesN<32>>,
-) -> BytesN<32>
-```
+### Reproducible Builds
 
-**Returns:** SHA-256 hash of all event IDs, proving the chain is complete and unmodified
+All artifacts in this repository are built reproducibly. The canonical build environment is defined in `docker/` and pinned to exact digests. To reproduce a build locally:
 
-## Use Cases
-
-### 1. Ethical Sourcing Verification
-
-A consumer can verify that their coffee was:
-- Sourced from a fair-trade certified farm
-- Transported through verified custody chain
-- Processed at a labor-compliant facility
-- Packaged with minimal environmental impact
-
-### 2. Quality Assurance
-
-A retailer can verify:
-- Product authenticity and batch numbers
-- All required certifications are current
-- Storage conditions tracked through custody chain
-- No counterfeits in the supply chain
-
-### 3. Compliance Reporting
-
-A brand can demonstrate:
-- Supplier audits and labor conditions
-- Environmental impact metrics
-- Third-party certifications
-- Continuous improvement trends
-
-### 4. Incident Response
-
-In case of product recall or quality issue:
-- Trace exact batch through entire supply chain
-- Identify affected facilities and regions
-- Contact all downstream holders
-- Prove remediation actions
-
-## Error Handling
-
-The module defines specific error codes:
-
-| Code | Error | Description |
-|------|-------|-------------|
-| 1001 | BrandNotRegistered | Brand does not exist |
-| 1002 | SkuNotFound | Product SKU not found |
-| 1003 | CertificationExpired | Certification is no longer valid |
-| 1004 | InvalidLaborReport | Labor conditions data missing |
-| 1005 | InvalidEnvironmentalData | Environmental report data missing |
-| 1006 | VerificationFailed | Product chain verification failed |
-| 1007 | IncompleteProvenance | Provenance trace incomplete |
-| 1008 | UnverifiedCertification | Certification not verified |
-| 1009 | UnauthorizedBrandAccess | Insufficient permissions |
-| 1010 | InvalidChainOfCustody | Custody transfers invalid |
-
-## Testing
-
-The module includes 19 comprehensive test cases covering:
-
-- Brand registration and product tracking
-- Provenance event logging
-- Custody transfer chains
-- Certification management
-- Labor conditions auditing
-- Environmental impact tracking
-- Product chain verification
-- Consumer timeline generation
-- Brand integrity reporting
-- Full end-to-end scenarios
-
-**Run tests:**
 ```bash
-cargo test supply_chain
+# Rust / soroban-sdk WASM
+SOURCE_DATE_EPOCH=1700000000 REGISTRY_URL=https://github.com/stellar/soroban-env \
+  cargo build --locked --release --target wasm32-unknown-unknown
+
+# Node.js / pnpm
+pnpm install --frozen-lockfile
+pnpm run build
+
+# Python / poetry
+POETRY_VERIFICATION="true" poetry install --no-root --no-interaction
+poetry build
 ```
 
-## Storage Optimization
+The canonical build is executed by `.github/workflows/reproducible-build.yml`. The workflow runs the build twice in distinct containers and fails if the resulting artifact digests differ.
 
-The module uses persistent storage with keys organized by:
+### SLSA Level 3
 
-- **Brands**: `Brand(Symbol)` → Brand struct
-- **Products**: `ProductSKU(Symbol, Bytes)` → ProductSKU struct
-- **Events**: `ProvenanceEvent(BytesN<32>)` → Provenance data
-- **Audits**: `LaborReport(BytesN<32>)`, `EnvironmentalReport(BytesN<32>)`
-- **Indices**: Brand products, certifications, facility audits for fast lookups
+This project aims for SLSA Level 3 compliance:
 
-## Security Considerations
+1. **Build as code** — every build is described by a versioned workflow file and a container image pinned by digest.
+2. **Isolated builder** — builds run in ephemeral GitHub-hosted runners with no inbound network access except to the declared dependency mirrors.
+3. **Signed provenance** — build provenance is generated as an in-toto attestation and signed with Sigstore/cosign.
+4. **Verifiable artifacts** — every published artifact has an attestation and an SBOM attached.
 
-1. **Authentication Required**: All logging functions require submitter authentication
-2. **Immutability**: Events are append-only and cryptographically sealed
-3. **Timestamp Validation**: Events must have recent timestamps
-4. **Access Control**: Only brand owners can modify brand data
-5. **Certification Expiry**: Automatic validation of active certifications
-6. **Content Addressing**: Event IDs derived from content (prevents ID collision)
+### Build Provenance
 
-## Future Enhancements
+Provenance is generated in the in-toto attestation format and signed via Sigstore. To verify an artifact:
 
-- Batch verification for multiple products
-- Automated compliance scoring algorithms
-- Integration with external data sources (APIs)
-- Blockchain bridge for cross-ledger verification
-- Consumer feedback and ratings system
-- Automated alerts for policy violations
-- Advanced analytics and trend reporting
+```bash
+cosign verify-attestation \
+  --certifidentity-regex "^.github.com/.*" \
+  --oidc-issuer https://token.actions.githubusercontent.com \
+  --signature artifact.sig
+
+cosign verify-blob \
+  --certifidentity-regex "^.github.com/.*" \
+  --oidc-issuer https://token.actions.githubusercontent.com \
+  --signature artifact.sig
+
+cosign verify-attestation --type slasprovenance \
+  --certifidentity-regex "^.github.com/.*" \
+  --oidc-issuer https://token.actions.githubusercontent.com \
+  --signature artifact.sig
+```
+
+### Software Bill of Materials
+
+SBOMs are generated in both SPDX and CycloneDXX formats for every release and attached to the release as signed attestations. The SBOM is available as `artifact.spdx.json` and `artifact.cdx.json`.
+
+### Dependency Verification
+
+Dependencies are audited on every pull request and on a nightly schedule:
+
+- Rust: `cargo audit` and `cargo deny check`
+- Node.js: `npm audit` and `pnpm audit`
+- Python: `pip-audit`
+
+Any high or critical vulnerability fails the build.
+
+### Verification Process for Users
+
+1. Download the artifact and its `.sig` and `.intototo.jsonl` attestation from the GitHub release.
+2. Verify the attestation with `cosign verify-attestation` using the commands above.
+3. Verify the SBOM against the artifact using `syft attest attestation verify` or the SLSA verifier.
+4. Optionally, rebuild the artifact using the published container image digest and compare the SHA-256 hash with the published one.
+
+### Automated Verification
+
+The `.github/workflows/reproducible-build.yml` workflow runs on every pull request and release. It builds the artifacts twice in separate containers, generates provenance and SBOM, and fails if any digest mismatches. The `dependency-review` workflow audits dependencies on every pull request.

@@ -107,6 +107,84 @@ fn test_log_multiple_events() {
 }
 
 #[test]
+fn test_historical_event_queries_use_ledger_snapshots() {
+    let (env, _owner, client) = create_ledger();
+    let submitter = Address::generate(&env);
+    let payment = symbol_short!("payment");
+
+    env.mock_all_auths();
+    let first_id = client.log_event(
+        &submitter,
+        &payment,
+        &Bytes::from_slice(&env, b"first"),
+        &None,
+        &None,
+        &false,
+    );
+    let first_ledger = env.ledger().sequence();
+
+    env.ledger().with_mut(|ledger| ledger.sequence = first_ledger + 1);
+    let second_id = client.log_event(
+        &submitter,
+        &payment,
+        &Bytes::from_slice(&env, b"second"),
+        &None,
+        &None,
+        &false,
+    );
+    let second_ledger = env.ledger().sequence();
+
+    assert_eq!(client.get_total_events_at_ledger(&first_ledger), 1);
+    assert_eq!(client.get_total_events_at_ledger(&second_ledger), 2);
+    assert_eq!(
+        client.get_event_at_ledger(&first_id, &first_ledger).metadata,
+        Bytes::from_slice(&env, b"first")
+    );
+    assert_eq!(
+        client
+            .get_event_by_type_at_ledger(&payment, &0, &second_ledger)
+            .metadata,
+        Bytes::from_slice(&env, b"first")
+    );
+    assert_eq!(
+        client
+            .get_event_by_type_at_ledger(&payment, &1, &second_ledger)
+            .event_hash,
+        client.get_event(&second_id).event_hash
+    );
+}
+
+#[test]
+fn test_historical_event_query_preserves_pre_update_event_state() {
+    let (env, owner, client) = create_ledger();
+    let submitter = Address::generate(&env);
+    let payment = symbol_short!("payment");
+
+    env.mock_all_auths();
+    let original_id = client.log_event(
+        &submitter,
+        &payment,
+        &Bytes::from_slice(&env, b"before"),
+        &None,
+        &None,
+        &false,
+    );
+    let original_ledger = env.ledger().sequence();
+    env.ledger().with_mut(|ledger| ledger.sequence = original_ledger + 1);
+    let updated_id = client.update_event(&owner, &0, &Bytes::from_slice(&env, b"after"));
+    let update_ledger = env.ledger().sequence();
+
+    assert_eq!(
+        client.get_event_at_ledger(&original_id, &original_ledger).metadata,
+        Bytes::from_slice(&env, b"before")
+    );
+    assert_eq!(
+        client.get_event_at_ledger(&updated_id, &update_ledger).metadata,
+        Bytes::from_slice(&env, b"after")
+    );
+}
+
+#[test]
 #[should_panic(expected = "HostError: Error(Contract, #4)")]
 fn test_get_nonexistent_event_panics() {
     let (env, _owner, client) = create_ledger();

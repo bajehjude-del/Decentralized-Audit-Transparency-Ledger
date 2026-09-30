@@ -1,6 +1,6 @@
 /// GraphQL schema extensions for token gating
 /// 
-/// Adds types and queries for:
+/// Adds types, queries, and subgraph-backed historical queries for:
 /// - Token tier queries and mutations
 /// - User access verification
 /// - Marketplace listings and purchases
@@ -12,6 +12,15 @@ export const tokenGatingTypeDefs = gql`
   # ========================================================================
   # Enums
   # ========================================================================
+
+  enum SubgraphEventType {
+    EVENT_LOGGED
+    EVENT_UPDATED
+    EVENT_ROLLED_BACK
+    GOVERNANCE
+    SNAPSHOT
+    ARCHIVE
+  }
 
   enum TokenStandard {
     """Stellar native asset (XLM or custom asset)"""
@@ -27,6 +36,41 @@ export const tokenGatingTypeDefs = gql`
   # ========================================================================
   # Types
   # ========================================================================
+
+  type SubgraphEvent {
+    """Unique event identifier (tx hash + log index)"""
+    id: ID!
+    """Event type"""
+    eventType: SubgraphEventType!
+    """Contract that emitted the event"""
+    contractAddress: String!
+    """Submitter address"""
+    submitter: String!
+    """Event payload as JSON string"""
+    payload: String!
+    """Ledger sequence of the event"""
+    ledger: Int!
+    """Timestamp of the event"""
+    timestamp: Int!
+    """Transaction hash"""
+    transactionHash: String!
+  }
+
+  type SubgraphEventConnection {
+    """List of events"""
+    edges: [SubgraphEventEdge!]!
+    """Pagination info"""
+    pageInfo: PageInfo!
+    """Total count of matching events"""
+    totalCount: Int!
+  }
+
+  type SubgraphEventEdge {
+    """The event"""
+    node: SubgraphEvent!
+    """Cursor for pagination"""
+    cursor: String!
+  }
 
   type TokenSpec {
     """Token standard (Stellar, ERC-20, ERC-721, ERC-1155)"""
@@ -194,6 +238,30 @@ export const tokenGatingTypeDefs = gql`
     tierStats: [TierStatistics!]!
   }
 
+  type SubmitterStats {
+    """Submitter address"""
+    submitter: String!
+    """Total events submitted"""
+    eventCount: Int!
+    """Number of rollbacks"""
+    rollbackCount: Int!
+    """Number of governance events"""
+    governanceCount: Int!
+    """First event timestamp"""
+    firstSeenAt: Int!
+    """Most recent event timestamp"""
+    lastSeenAt: Int!
+  }
+
+  type EventTypeStats {
+    """Event type"""
+    eventType: SubgraphEventType!
+    """Total events of this type"""
+    eventCount: Int!
+    """Number of unique submitters"""
+    uniqueSubmitters: Int!
+  }
+
   type TierStatistics {
     """Tier identifier"""
     tierId: String!
@@ -300,6 +368,33 @@ export const tokenGatingTypeDefs = gql`
 
     """Get aggregated token gating statistics"""
     tokenGatingStats: TokenGatingStats!
+
+    """Query indexed contract events from the subgraph"""
+    subgraphEvents(
+      """Filter by event type"""
+      eventType: SubgraphEventType
+      """Filter by submitter address"""
+      submitter: String
+      """Filter by contract address"""
+      contractAddress: String
+      """Filter events at or after this ledger"""
+      fromLedger: Int
+      """Filter events at or before this ledger"""
+      toLedger: Int
+      """Pagination limit"""
+      limit: Int
+      """Pagination cursor"""
+      after: String
+    ): SubgraphEventConnection!
+
+    """Get a single indexed event by ID"""
+    subgraphEvent(id: ID!): SubgraphEvent
+
+    """Aggregated stats per submitter"""
+    submitterStats(submitter: String!): SubmitterStats
+
+    """Aggregated stats per event type"""
+    eventTypeStats: [EventTypeStats!]!
 
     """Get verification cache record"""
     verificationCache(

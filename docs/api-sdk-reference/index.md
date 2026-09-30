@@ -4,7 +4,7 @@ This documentation is automatically generated from the OpenAPI specification and
 
 ## API Version: 1.1.0
 
-*Last updated: $(date +%Y-%m-%d)*
+*Last updated: 2024-01-01*
 
 ## Table of Contents
 
@@ -14,11 +14,18 @@ This documentation is automatically generated from the OpenAPI specification and
 4. [Events Endpoints](#events-endpoints)
 5. [Export Endpoints](#export-endpoints)
 6. [Statistics Endpoint](#statistics-endpoint)
+7. [Authentication and Authorization](#authentication-and-authorization)
+8. [Rate Limiting and Quotas](#rate-limiting-and-quotas)
+9. [Error Codes and Handling](#error-codes-and-handling)
+10. [Versioning and Deprecation Policy](#versioning-and-deprecation-policy)
+11. [Interactive API Explorer](#interactive-api-explorer)
+12. [GraphQL Schema](#graphql-schema)
+13. [WebSocket API](#websocket-api)
 
 ## Health Endpoints
 
 ### Get Health Status
-`GET /healthz`
+GET /healthz
 
 Check if the service is alive.
 
@@ -57,8 +64,20 @@ val health = client.getHealth()
 println("Health status: ${health.status}")
 ```
 
+**JavaScript**
+```javascript
+const health = await client.health();
+console.log(`Health status: ${health.status}`);
+```
+
+**Python**
+```python
+health = await client.health()
+print(f"Health status: {health.status}")
+```
+
 ### Get Readiness Status
-`GET /readyz`
+GET /readyz
 
 Check if the service is ready to serve requests (includes dependency checks).
 
@@ -98,10 +117,22 @@ val readiness = client.getReadiness()
 println("Readiness status: ${readiness.status}")
 ```
 
+**JavaScript**
+```javascript
+const readiness = await client.readiness();
+console.log(`Readiness status: ${readiness.status}`);
+```
+
+**Python**
+```python
+readiness = await client.readiness()
+print(f"Readiness status: {readiness.status}")
+```
+
 ## Metrics Endpoint
 
 ### Get Prometheus Metrics
-`GET /metrics`
+GET /metrics
 
 Get Prometheus-compatible metrics.
 
@@ -140,11 +171,22 @@ val metrics = client.getMetrics()
 println("Metrics:\n$metrics")
 ```
 
+**JavaScript**
+```javascript
+const metrics = await client.metrics();
+console.log(`Metrics:\n${metrics}`);
+```
+
+**Python**
+```python
+metrics = await client.metrics()
+print(f"Metrics:\n{metrics}")
+```
+
 ## Cache Endpoints
 
 ### Get Cache Statistics
-`GET /cache/stats`
-
+GET /cache/stats
 Get contract statistics.
 
 #### Responses
@@ -189,8 +231,20 @@ val cacheStats = client.getCacheStats()
 println("Cache stats: hits=${cacheStats.hits} misses=${cacheStats.misses} total=${cacheStats.totalRequests} hitRate=${cacheStats.hitRate} lastReset=${cacheStats.lastReset}")
 ```
 
+**JavaScript**
+```javascript
+const cacheStats = await client.cacheStats();
+console.log(`Cache stats: hits=${cacheStats.hits} misses=${cacheStats.misses} total=${cacheStats.totalRequests} hitRate=${cacheStats.hitRate} lastReset=${cacheStats.lastReset}`);
+```
+
+**Python**
+```python
+cache_stats = await client.cache_stats()
+print(f"Cache stats: hits={cache_stats.hits} misses={cache_stats.misses} total={cache_stats.total_requests} hit_rate={cache_stats.hit_rate} last_reset={cache_stats.last_reset}")
+```
+
 ### Invalidate Cache
-`POST /cache/invalidate`
+POST /cache/invalidate
 
 Reset all cache statistics and force fresh responses on next requests.
 
@@ -229,18 +283,30 @@ val invalidateResp = client.invalidateCache()
 println("Cache invalidation result: ${invalidateResp.data.message}")
 ```
 
+**JavaScript**
+```javascript
+const invalidateResp = await client.invalidateCache();
+console.log(`Cache invalidation result: ${invalidateResp.data.message}`);
+```
+
+**Python**
+```python
+invalidate_resp = await client.invalidate_cache()
+print(f"Cache invalidation result: {invalidate_resp.data.message}")
+```
+
 ## Events Endpoints
 
 ### List Events
-`GET /events`
+GET /events
 
-Returns a paginated list of audit events. Supports all standard filter query parameters (type, submitter, metadata, startTime, endTime, sort, order).
+Get a paginated list of audit events. Supports all standard filter query parameters (type, submitter, metadata, startTime, endTime, sort, order).
 
 #### Query Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| limit | integer | Number of events to return per page (1–1000) |
+| limit | integer | Number of events to return per page (1-1000) |
 | offset | integer | Number of events to skip from the beginning |
 | type | string | Filter by event type (case-insensitive partial match) |
 | submitter | string | Filter by submitter address (partial match) |
@@ -305,7 +371,7 @@ for (Event event : events.getData()) {
 ```kotlin
 val filters = mapOf(
     "type" to "payment",
-    "submitter" to "GABCD..."
+    "submitter" to "GARCD..."
 )
 val events = client.listEvents(50, 0, filters)
 println("Found ${events.data.size} events")
@@ -314,8 +380,26 @@ for (event in events.data) {
 }
 ```
 
+**JavaScript**
+```javascript
+const filters = { type: "payment", submitter: "GABCD..." };
+const events = await client.listEvents(50, 0, filters);
+console.log(`Found ${events.data.length} events`);
+events.data.forEach(event => {
+  console.log(`Event ${event.index}: type=${event.eventType} submitter=${event.submitter} timestamp=${event.timestamp}`);
+});
+```
+
+**Python**
+```python
+events = await client.list_events(limit=50, offset=0, filters={"type": "payment", "submitter": "GABCD..."})
+print(f"Found {len(events.data)} events")
+for event in events.data:
+    print(f"Event {event.index}: type={event.event_type} submitter={event.submitter} timestamp={event.timestamp}")
+```
+
 ### Get Event by Index
-`GET /events/{index}`
+GET /events/{index}
 
 Get event by sequential index.
 
@@ -365,8 +449,20 @@ val event = client.getEvent(42)
 println("Event: type=${event.eventType} submitter=${event.submitter} timestamp=${event.timestamp}")
 ```
 
+**JavaScript**
+```javascript
+const event = await client.getEvent(42);
+console.log(`Event: type=${event.eventType} submitter=${event.submitter} timestamp=${event.timestamp}`);
+```
+
+**Python**
+```python
+event = await client.get_event(42)
+print(f"Event: type={event.event_type} submitter={event.submitter} timestamp={event.timestamp}")
+```
+
 ### Get Events by Type
-`GET /events/type/{type}`
+GET /events/type/{type}
 
 Returns all events matching the given type. Supports pagination via limit and offset parameters.
 
@@ -380,7 +476,7 @@ Returns all events matching the given type. Supports pagination via limit and of
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| limit | integer | Number of events to return per page (1–1000) |
+| limit | integer | Number of events to return per page (1-1000) |
 | offset | integer | Number of events to skip from the beginning |
 
 #### Responses
@@ -419,8 +515,20 @@ val events = client.getEventsByType("payment", 20, 0)
 println("Found ${events.data.size} payment events")
 ```
 
+**JavaScript**
+```javascript
+const events = await client.getEventsByType("payment", 20, 0);
+console.log(`Found ${events.data.length} payment events`);
+```
+
+**Python**
+```python
+events = await client.get_events_by_type("payment", limit=20, offset=0)
+print(f"Found {len(events.data)} payment events")
+```
+
 ### Search Events
-`GET /events/search`
+GET /events/search
 
 Search events by multiple filter criteria.
 
@@ -428,7 +536,7 @@ Search events by multiple filter criteria.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| limit | integer | Number of events to return per page (1–1000) |
+| limit | integer | Number of events to return per page (1-1000) |
 | offset | integer | Number of events to skip from the beginning |
 | type | string | Filter by event type (case-insensitive partial match) |
 | submitter | string | Filter by submitter address (partial match) |
@@ -452,12 +560,12 @@ Search events by multiple filter criteria.
 events, resp, err := client.SearchEvents(context.Background(), 10, 0, map[string]string{
     "type": "governance",
     "startTime": "1640995200", // 2022-01-01
-    "endTime": "1643673600",   // 2022-02-01
+    "endTime": "1643670400",   // 2022-02-01
 })
 if err != nil {
     log.Fatalf("Failed to search events: %v", err)
 }
-fmt.Printf("Found %d governance events from Jan 2022\n", len(events.Data))
+fmt.Printf("Found %d governance events\n", len(events.Data))
 ```
 
 **Rust**
@@ -465,369 +573,265 @@ fmt.Printf("Found %d governance events from Jan 2022\n", len(events.Data))
 let mut filters = HashMap::new();
 filters.insert("type".to_string(), "governance".to_string());
 filters.insert("startTime".to_string(), "1640995200".to_string());
-filters.insert("endTime".to_string(), "1643673600".to_string());
+filters.insert("endTime".to_string(), "1643670400".to_string());
 let events = client.search_events(Some(10), Some(0), filters).await?;
-println!("Found {} governance events from Jan 2022", events.data.as_ref().map(|v| v.len()).unwrap_or(0));
+println!("Found {} governance events", events.data.as_ref().map(|v| v.len()).unwrap_or(0));
 ```
 
 **Java**
 ```java
 Map<String, String> filters = new HashMap<>();
 filters.put("type", "governance");
-filters.put("startTime", "1640995200"); // 2022-01-01
-filters.put("endTime", "1643673600");   // 2022-02-01
+filters.put("startTime", "1640995200");
+filters.put("endTime", "1643670400");
 EventListResponse events = client.searchEvents(10, 0, filters);
-System.out.printf("Found %d governance events from Jan 2022%n", events.getData().size());
+System.out.printf("Found %d governance events%n", events.getData().size());
 ```
 
 **Kotlin**
 ```kotlin
 val filters = mapOf(
     "type" to "governance",
-    "startTime" to "1640995200", // 2022-01-01
-    "endTime" to "1643673600"    // 2022-02-01
+    "startTime" to "1640995200",
+    "endTime" to "1643670400"
 )
 val events = client.searchEvents(10, 0, filters)
-println("Found ${events.data.size} governance events from Jan 2022")
+println("Found ${events.data.size} governance events")
+```
+
+**JavaScript**
+```javascript
+const filters = { type: "governance", startTime: "1640995200", endTime: "1643670400" };
+const events = await client.searchEvents(10, 0, filters);
+console.log(`Found ${events.data.length} governance events`);
+```
+
+**Python**
+```python
+events = await client.search_events(
+    limit=10, offset=0,
+    filters={"type": "governance", "startTime": "1640995200", "endTime": "1643670400"}
+)
+print(f"Found {len(events.data)} governance events")
 ```
 
 ## Export Endpoints
 
-### Export Events as JSON
-`GET /export/events.json`
+### Export Events
+GET /export
 
-Export events as JSON.
-
-#### Query Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| limit | integer | Maximum number of events to export |
-| offset | integer | Number of events to skip |
-| fields | string | Comma-separated list of fields to include |
-| filter | string | Filter to apply |
-
-#### Responses
-
-| Status Code | Description |
-|-------------|-------------|
-| 200 | JSON export of events |
-
-#### SDK Snippets
-
-**Go**
-```go
-export, resp, err := client.ExportEventsJSON(context.Background(), 100, 0, "index,timestamp,event_type,submitter", "")
-if err != nil {
-    log.Fatalf("Failed to export events as JSON: %v", err)
-}
-fmt.Printf("Exported %d events as JSON\n", len(export.Data))
-```
-
-**Rust**
-```rust
-let export = client.export_events_json(Some(100), Some(0), Some("index,timestamp,event_type,submitter".to_string()), None).await?;
-println!("Exported {} events as JSON", export.data.as_ref().map(|v| v.len()).unwrap_or(0));
-```
-
-**Java**
-```java
-ExportResponse export = client.exportEventsJson(100, 0, "index,timestamp,event_type,submitter", "");
-System.out.printf("Exported %d events as JSON%n", export.getData().size());
-```
-
-**Kotlin**
-```kotlin
-val export = client.exportEventsJson(100, 0, "index,timestamp,event_type,submitter", null)
-println("Exported ${export.data.size} events as JSON")
-```
-
-### Export Events as CSV
-`GET /export/events.csv`
-
-Export events as CSV.
+Export events in CSV or JSON format.
 
 #### Query Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| limit | integer | Maximum number of events to export |
-| offset | integer | Number of events to skip |
-| fields | string | Comma-separated list of fields to include |
-| filter | string | Filter to apply |
+| format | string | Output format (csv, json) |
+| type | string | Filter by event type |
+| submitter | string | Filter by submitter address |
+| startTime | integer | Only include events at or after this unix timestamp (seconds) |
+| endTime | integer | Only include events at or before this unix timestamp (seconds) |
 
 #### Responses
 
 | Status Code | Description |
 |-------------|-------------|
-| 200 | CSV export of events |
+| 200 | Exported events in requested format |
+| 400 | Invalid export parameters |
 
 #### SDK Snippets
 
 **Go**
 ```go
-csvData, resp, err := client.ExportEventsCSV(context.Background(), 100, 0, "index,timestamp,event_type,submitter", "")
+export, resp, err := client.ExportEvents(context.Background(), "json", map[string]string{
+    "type": "payment",
+})
 if err != nil {
-    log.Fatalf("Failed to export events as CSV: %v", err)
+    log.Fatalf("Failed to export events: %v", err)
 }
-fmt.Printf("Exported %d events as CSV (%d bytes)\n", len(export.Data), len(csvData))
+ftm.Printf("Exported %d bytes\n", len(export))
 ```
 
 **Rust**
 ```rust
-let csvData = client.export_events_csv(Some(100), Some(0), Some("index,timestamp,event_type,submitter".to_string()), None).await?;
-println!("Exported {} events as CSV ({} bytes)", 
-    export.data.as_ref().map(|v| v.len()).unwrap_or(0), csvData.len());
+let mut filters = HashMap::new();
+filters.insert("type".to_string(), "payment".to_string());
+let export = client.export_events("json", filters).await?;
+println!("Exported {} bytes", export.len());
 ```
 
 **Java**
 ```java
-byte[] csvData = client.exportEventsCsv(100, 0, "index,timestamp,event_type,submitter", "");
-System.out.printf("Exported %d events as CSV (%d bytes)%n", 
-    export.getData().size(), csvData.length);
+Map<String, String> filters = new HashMap<>();
+filters.put("type", "payment");
+byte[] export = client.exportEvents("json", filters);
+System.out.printf("Exported %d bytes%n", export.length);
 ```
 
 **Kotlin**
 ```kotlin
-val csvData = client.exportEventsCsv(100, 0, "index,timestamp,event_type,submitter", null)
-println("Exported ${export.data.size} events as CSV (${csvData.size} bytes)")
+val filters = mapOf("type" to "payment")
+val export = client.exportEvents("json", filters)
+println("Exported ${export.size} bytes")
 ```
 
-### Export Events as Stream
-`GET /export/events/stream`
-
-Streaming JSON export of events.
-
-#### Query Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| limit | integer | Maximum number of events to export |
-| offset | integer | Number of events to skip |
-| fields | string | Comma-separated list of fields to include |
-
-#### Responses
-
-| Status Code | Description |
-|-------------|-------------|
-| 200 | Streaming JSON events |
-| Header: X-Export-Status | running, completed, failed |
-
-#### SDK Snippets
-
-**Go**
-```go
-resp, err := client.ExportEventsStream(context.Background(), 1000, 0, "")
-if err != nil {
-    log.Fatalf("Failed to start export stream: %v", err)
-}
-defer resp.Body.Close()
-
-// Process the stream
-decoder := json.NewDecoder(resp.Body)
-for {
-    var event Event
-    if err := decoder.Decode(&event); err != nil {
-        if err == io.EOF {
-            break
-        }
-        log.Fatalf("Failed to decode event: %v", err)
-    }
-    fmt.Printf("Event: %d %s %s\n", event.Index, event.EventType, event.Submitter)
-}
+**JavaScript**
+```javascript
+const export = await client.exportEvents("json", { type: "payment" });
+console.log(`Exported ${export.length} bytes`);
 ```
 
-**Rust**
-```rust
-let mut stream = client.export_events_stream(Some(1000), Some(0), Some("".to_string())).await?;
-while let Some(chunk) = stream.chunk().await? {
-    let text = std::str::from_utf8(&chunk)?;
-    // Process each line as JSON
-    for line in text.lines() {
-        if let Ok(event) = serde_json::from_str::<Event>(line) {
-            println!("Event: {} {} {}", event.index.unwrap_or(0), 
-                event.event_type.as_deref().unwrap_or(""), 
-                event.submitter.as_deref().unwrap_or(""));
-        }
-    }
-}
-```
-
-**Java**
-```java
-// Note: For streaming, Java SDK provides the raw response which you can process with Jackson's Streaming API
-try (CloseableHttpResponse response = client.exportEventsStream(1000, 0, "")) {
-    HttpEntity entity = response.getEntity();
-    if (entity != null) {
-        InputStream input = entity.getContent();
-        // Use Jackson's Streaming API to process the stream
-        JsonFactory jsonFactory = new JsonFactory();
-        JsonParser parser = jsonFactory.createParser(input);
-        
-        while (!parser.isClosed()) {
-            JsonToken jsonToken = parser.nextToken();
-            if (jsonToken == JsonToken.START_OBJECT) {
-                Event event = parser.readValueAs(Event.class);
-                System.out.printf("Event: %d %s %s%n", 
-                    event.getIndex(), event.getEventType(), event.getSubmitter());
-            }
-        }
-    }
-}
-```
-
-**Kotlin**
-```kotlin
-// Note: For streaming, Kotlin SDK provides the raw response which you can process with Jackson's Streaming API
-val response = client.exportEventsStream(1000, 0, "")
-response.entity?.content?.use { input ->
-    val jsonFactory = JsonFactory()
-    val parser = jsonFactory.createParser(input)
-    
-    while (!parser.isClosed) {
-        val jsonToken = parser.nextToken()
-        if (jsonToken == JsonToken.START_OBJECT) {
-            val event = parser.readValueAs(Event::class.java)
-            println("Event: ${event.index} ${event.eventType} ${event.submitter}")
-        }
-    }
-}
-```
-
-### Export Progress
-`GET /export/progress`
-
-Get export progress status.
-
-#### Responses
-
-| Status Code | Description |
-|-------------|-------------|
-| 200 | Current export status |
-
-#### SDK Snippets
-
-**Go**
-```go
-progress, resp, err := client.ExportProgress(context.Background())
-if err != nil {
-    log.Fatalf("Failed to get export progress: %v", err)
-}
-fmt.Printf("Export progress: %s\n", string(progress))
-```
-
-**Rust**
-```rust
-let progress = client.export_progress().await?;
-println!("Export progress: {}", String::from_utf8_lossy(&progress));
-```
-
-**Java**
-```java
-byte[] progress = client.exportProgress();
-System.out.println("Export progress: " + new String(progress, StandardCharsets.UTF_8));
-```
-
-**Kotlin**
-```kotlin
-val progress = client.exportProgress()
-println("Export progress: ${String(progress, Charsets.UTF_8)}")
+**Python**
+```python
+export = await client.export_events(format="json", filters={"type": "payment"})
+print(f"Exported {len(export)} bytes")
 ```
 
 ## Statistics Endpoint
 
 ### Get Statistics
-`GET /stats`
+GET /stats
 
-Get contract statistics.
+Get aggregated statistics about events.
 
 #### Responses
 
 | Status Code | Description |
 |-------------|-------------|
-| 200 | Contract statistics |
+| 200 | Aggregated statistics |
 
 #### SDK Snippets
 
 **Go**
 ```go
-stats, resp, err := client.GetStatistics(context.Background())
+stats, resp, err := client.Stats(context.Background())
 if err != nil {
-    log.Fatalf("Failed to get statistics: %v", err)
+    log.Fatalf("Failed to get stats: %v", err)
 }
-fmt.Printf("Statistics: totalEvents=%d globalMaxLogs=%d\n", 
-    stats.TotalEvents, stats.GlobalMaxLogs)
-for (eventType, count) := range stats.EventsByType {
-    fmt.Printf("  %s: %d\n", eventType, count)
-}
+fmt.Printf("Stats: totalEvents=%d uniqueSubmitters=%d\n", 
+    stats.TotalEvents, stats.UniqueSubmitters)
 ```
 
 **Rust**
 ```rust
-let stats = client.get_statistics().await?;
-println!("Statistics: total_events={} global_max_logs={}", 
-    stats.total_events.unwrap_or(0), stats.global_max_logs.unwrap_or(0));
-for (eventType, count) in stats.events_by_type.unwrap_or_default() {
-    println!("  {}: {}", eventType, count);
-}
+let stats = client.stats().await?;
+println!("Stats: total_events={} unique_submitters={}", 
+    stats.total_events, stats.unique_submitters);
 ```
 
 **Java**
 ```java
-Statistics stats = client.getStatistics();
-System.out.printf("Statistics: totalEvents=%d globalMaxLogs=%d%n",
-    stats.getTotalEvents(), stats.getGlobalMaxLogs());
-for (Map.Entry<String, Long> entry : stats.getEventsByType().entrySet()) {
-    System.out.printf("  %s: %d%n", entry.getKey(), entry.getValue());
-}
+Stats stats = client.getStats();
+System.out.printf("Stats: totalEvents=%d uniqueSubmitters=%d%n",
+    stats.getTotalEvents(), stats.getUniqueSubmitters());
 ```
 
 **Kotlin**
 ```kotlin
-val stats = client.getStatistics()
-println("Statistics: totalEvents=${stats.totalEvents} globalMaxLogs=${stats.globalMaxLogs}")
-for ((eventType, count) in stats.eventsByType) {
-    println("  $eventType: $count")
-}
+val stats = client.getStats()
+println("Stats: totalEvents=${stats.totalEvents} uniqueSubmitters=${stats.uniqueSubmitters}")
 ```
 
-## Versioning
-
-This documentation corresponds to API version 1.1.0.
-
-SDK versions:
-- Go: 0.1.0
-- Rust: 0.1.0
-- Java/Kotlin: 0.1.0
-
-## Interactive Examples
-
-You can try out the API directly using the following tools:
-
-### Swagger UI
-Visit `http://localhost:3002/api/docs` to explore the API interactively.
-
-### cURL Examples
-```bash
-# Get health status
-curl http://localhost:3002/v1/healthz
-
-# List events
-curl "http://localhost:3002/v1/events?limit=10&offset=0"
-
-# Get statistics
-curl http://localhost:3002/v1/stats
+**JavaScript**
+```javascript
+const stats = await client.stats();
+console.log(`Stats: totalEvents=${stats.totalEvents} uniqueSubmitters=${stats.uniqueSubmitters}`);
 ```
 
-## Error Handling
+**Python**
+```python
+stats = await client.stats()
+print(f"Stats: total_events={stats.total_events} unique_submitters={stats.unique_submitters}")
+```
 
-All SDKs return detailed error information when API calls fail.
+## Authentication and Authorization
 
-**Go**: Returns an `error` value that can be checked for `APIError` type
-**Rust**: Returns a `Result<T, Error>` where `Error` is an enum with variant `ApiError`
-**Java**: Throws `AuditLedgerException` with status code and message
-**Kotlin**: Throws `AuditLedgerException` with status code and message
+All API requests require authentication via Bearer tokens.
 
-## License
+### Authentication Method
 
-This documentation is part of the AuditLedger project and is licensed under the MIT License.
+Include the token in the `Authorization` header:
+
+```
+Authorization: Bearer <your-api-token>
+```
+
+### Authorization Scopes
+
+| Scope | Description |
+|-------|-------------|
+| events:read | Read access to events |
+| events:write | Write access to events |
+| cache:admin | Administrative access to cache operations |
+| export:read | Read access to export operations |
+
+### SDK Authentication Examples
+
+**Go**
+```go
+client := auditledger.NewClient(auditledger.ClientOptions{
+    APIKey: "your-api-token",
+})
+```
+
+**JavaScript**
+```javascript
+const client = new AuditLedgerClient({ apiKey: "your-api-token" });
+```
+
+**Python**
+```python
+client = AuditLedgerClient(api_key="your-api-token")
+```
+
+**Rust**
+```rust
+let client = AuditLedgerClient::new(ClientOptions {
+    api_key: "your-api-token".to_string(),
+});
+```
+
+## Rate Limiting and Quotas
+
+Rate limits are enforced per API key. Exceeding the limit returns HTTP 429 with a `Retry-After` header.
+
+| Tier | Requests/min | Burst |
+|------|-------------|-------|
+| Free | 60 | 120 |
+| Pro | 600 | 1200 |
+| Enterprise | 6000 | 12000 |
+
+## Error Codes and Handling
+
+All errors return a JSON object with a code and message.
+
+| Status Code | Code | Description |
+|-------------|------|-------------|
+| 400 | INVALID_REQUEST | Invalid request parameters |
+| 401 | UNAUTHORIZED | Missing or invalid token |
+| 403 | FORBIDDEN | Insufficient permissions |
+| 404 | NOT_FOUND | Resource not found |
+| 429 | RATE_LIMITED_ | Rate limit exceeded |
+| 500 | INTERNAL_ERROR | Internal server error |
+
+## Versioning and Deprecation Policy
+
+The API follows semantic versioning. Major versions may introduce breaking changes. Minor versions add backward-compatible features. Patch versions include bug fixes.
+
+## Interactive API Explorer
+
+The interactive API explorer is available at `/docs/api-explorer`. It is generated from the OpenAPI spec at `api/openapi.yaml`.
+
+## GraphQL Schema
+
+The GraphQL schema is available at `/graphql/schema`. It includes descriptions for all types and fields.
+
+## WebSocket API
+
+The WebSocket API is available at `/ws`. It supports the following events:
+
+| Event | Description |
+|-------|-------------|
+| event.created | Emitted when a new event is created |
+| event.updated | Emitted when an event is updated |
+| cache.invalidated | Emitted when the cache is invalidated |

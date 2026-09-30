@@ -1,0 +1,42 @@
+apiVersion: runbooks.audit-ledger.io/v1
+kind: OperationalRunbook
+metadata:
+  id: RB-006-RPC-OUTAGE
+  name: Stellar / Soroban RPC Endpoint Outage & Failover
+  version: 1.0.0
+spec:
+  type: RPC_FAILOVER
+  author: DevOps & Platform SRE
+  description: "Detect RPC endpoint unavailability or severe latency spikes (>3000ms), circuit break, and switch traffic to secondary/tertiary RPC clusters"
+  preconditions:
+    - check: primary_rpc_probe_consecutive_failures
+      minFailures: 3
+    - check: standby_rpc_health
+      statusMustBe: "healthy"
+  steps:
+    - id: 1
+      name: "Confirm Primary RPC Outage via Health Probe"
+      isIdempotent: true
+      timeoutSeconds: 15
+      action: "probe_primary_rpc_health"
+    - id: 2
+      name: "Trip Circuit Breaker and Drain In-flight Requests"
+      isIdempotent: true
+      timeoutSeconds: 20
+      action: "open_rpc_circuit_breaker_and_drain"
+    - id: 3
+      name: "Promote Secondary Standby RPC to Active"
+      isIdempotent: true
+      timeoutSeconds: 20
+      action: "route_traffic_to_standby_rpc"
+      rollback: "route_traffic_to_primary_rpc"
+    - id: 4
+      name: "Verify Ledger Sequence Sync on Standby RPC"
+      isIdempotent: true
+      timeoutSeconds: 30
+      action: "assert_standby_rpc_ledger_sequence_caught_up"
+    - id: 5
+      name: "Reset Connection Pools and Reopen Circuit Breaker"
+      isIdempotent: true
+      timeoutSeconds: 15
+      action: "close_rpc_circuit_breaker"

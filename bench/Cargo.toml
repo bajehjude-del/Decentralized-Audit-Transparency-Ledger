@@ -1,0 +1,35 @@
+[package]
+name = "audit-ledger-bench"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic benchmarking suite for the AuditLedger Soroban contract"
+license = "MIT"
+repository = "https://github.com/daddygokings-art/Decentralized-Audit-Transparency-Ledger"
+publish = false
+
+[dependencies]
+# The contract under test. Linked as a normal dependency so that the benchmark
+# crate stays free of the contract's heavy dev-dependencies (testcontainers,
+# rdkafka, pulsar, ...), which keeps `cargo bench` fast enough for pull requests.
+audit-ledger = { path = "..", features = ["testutils"] }
+soroban-sdk = { version = "27.0.6", features = ["testutils"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# WASM artifact hashing for the report. Both crates are already in the workspace
+# lockfile, so this adds no new resolution surface.
+hex = "0.4"
+sha2 = "0.10"
+
+# `harness = false` gives us a plain `fn main()`: Soroban benchmarks are
+# metered through the host budget, not through the libtest timing loop.
+[[bench]]
+name = "contract_bench"
+path = "benches/contract_bench.rs"
+harness = false
+
+# No `[profile.*]` section here on purpose: cargo only honours profiles declared
+# in the workspace root manifest, so a local override would be silently ignored.
+# The suite therefore builds with the root contract profile (`opt-level = "z"`,
+# `lto = true`, `strip = "symbols"`). That is the profile the deployed WASM uses,
+# which keeps the measured contract code identical to production, and the
+# regression gate keys on host-metered resources rather than on host wall-clock.

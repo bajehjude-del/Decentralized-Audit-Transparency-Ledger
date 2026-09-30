@@ -1,5 +1,9 @@
 version: "3.9"
 
+# GitOps deployment model: ArgoCD/Flux manages Kubernetes manifests in gitops/.
+# This file is retained for local development and smoke testing only.
+# Production deployments are performed via ArgoCD applications defined in gitops/argocd/.
+
 services:
   relayer:
     build: ./bridge/relayer
@@ -7,10 +11,10 @@ services:
     environment:
       STELLAR_RPC: "${STELLAR_RPC:-https://soroban-testnet.stellar.org}"
       CONTRACT_ID: "${CONTRACT_ID}"
-      EVM_RPC: "${EVM_RPC:-http://localhost:8545}"
+      EVM_RPC: "${EVM_RPC:http://localhost:8545}"
       VERIFIER_ADDRESS: "${VERIFIER_ADDRESS}"
       RELAY_PRIVATE_KEY: "${RELAY_PRIVATE_KEY}"
-      POLL_INTERVAL_MS: "${POLL_INTERVAL_MS:-5000}"
+      POLL_INTERVAL_MS: "${POLL_INTERVAL_MS:5000}"
       HEALTH_PORT: "8080"
     ports:
       - "8080:8080"
@@ -18,8 +22,7 @@ services:
     # Issue #145: Health check endpoint
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
-      interval: 15s
-      timeout: 5s
+      interval: 15s&#10;      timeout: 5s
       retries: 3
 
   metrics-exporter:
@@ -29,7 +32,7 @@ services:
       CONTRACT_ID: "${CONTRACT_ID}"
       RPC_URL: "${RPC_URL:-https://soroban-testnet.stellar.org}"
       NETWORK: "${NETWORK:-testnet}"
-      SCRAPE_INTERVAL_MS: "${SCRAPE_INTERVAL_MS:-15000}"
+      SCRAPE_INTERVAL_MS: "${SCRAPE_INTERVAL_MS:15000}"
       EVENT_TYPES: "${EVENT_TYPES:-}"
     ports:
       - "8000:8000"
@@ -67,6 +70,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-admin}"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/audit-ledger.json
+      # Security headers required by ZAP scan (#740)
+      GF_SERVER_CUSTOM_RESPONSE_HEADERS: "Cross-Origin-Embedder-Policy=require-corp;Cross-Origin-Opener-Policy=same-origin;Cross-Origin-Resource-Policy=same-origin"
     ports:
       - "3000:3000"
     restart: unless-stopped

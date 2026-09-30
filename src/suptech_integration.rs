@@ -1,7 +1,8 @@
 #![no_std]
 
-use crate::suptech_types::{RegulatoryFramework, SupervisoryReport};
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use crate::suptech_types::RegulatoryFramework;
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::xdr::ToXdr;
 
 /// Regulatory integration endpoint.
 #[contracttype]
@@ -10,7 +11,7 @@ pub struct RegulatoryEndpoint {
     /// Endpoint ID
     pub endpoint_id: BytesN<32>,
     /// Regulatory framework
-    pub framework: u8, // RegulatoryFramework as u8
+    pub framework: u32, // RegulatoryFramework as u32
     /// Endpoint URL/address
     pub endpoint_address: Bytes,
     /// API protocol version
@@ -20,7 +21,7 @@ pub struct RegulatoryEndpoint {
     /// Is active
     pub is_active: bool,
     /// Endpoint status (connected, disconnected, error)
-    pub status: u8, // EndpointStatus as u8
+    pub status: u32, // EndpointStatus as u32
     /// Sync frequency (seconds)
     pub sync_frequency: u64,
 }
@@ -35,7 +36,7 @@ pub enum EndpointStatus {
     /// Disconnected but recoverable
     Disconnected = 1,
     /// Error state
-    Error = 2,
+    Failed = 2,
     /// Maintenance/offline
     Maintenance = 3,
 }
@@ -65,7 +66,7 @@ pub struct TransmissionRecord {
     /// Acknowledgment timestamp
     pub acknowledged_at: Option<u64>,
     /// Transmission status
-    pub status: u8, // TransmissionStatus as u8
+    pub status: u32, // TransmissionStatus as u32
 }
 
 /// Transmission status.
@@ -113,12 +114,12 @@ impl IntegrationManager {
 
         Ok(RegulatoryEndpoint {
             endpoint_id,
-            framework: framework as u8,
+            framework: framework as u32,
             endpoint_address,
             protocol_version,
             last_sync: 0,
             is_active: true,
-            status: EndpointStatus::Connected as u8,
+            status: EndpointStatus::Connected as u32,
             sync_frequency: 3600, // Default: 1 hour
         })
     }
@@ -127,13 +128,10 @@ impl IntegrationManager {
     pub fn compute_endpoint_id(env: &Env, framework: RegulatoryFramework) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(
-            env,
-            framework.as_symbol().to_string().as_bytes(),
-        ));
+        input.append(&Bytes::from_slice(env, framework.code().as_bytes()));
         input.append(&Bytes::from_slice(env, b"ENDPOINT"));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Create transmission record
@@ -158,7 +156,7 @@ impl IntegrationManager {
             data_hash,
             transmitted_at: env.ledger().timestamp(),
             acknowledged_at: None,
-            status: TransmissionStatus::Transmitted as u8,
+            status: TransmissionStatus::Transmitted as u32,
         })
     }
 
@@ -170,11 +168,11 @@ impl IntegrationManager {
     ) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, source.to_xdr().as_ref()));
-        input.append(&Bytes::from_slice(env, destination.to_xdr().as_ref()));
+        input.append(&source.to_xdr(env));
+        input.append(&destination.to_xdr(env));
         input.append(&Bytes::from_slice(env, &env.ledger().timestamp().to_le_bytes()));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Acknowledge transmission (regulator confirms receipt)
@@ -182,22 +180,22 @@ impl IntegrationManager {
         env: &Env,
         transmission: &mut TransmissionRecord,
     ) -> Result<(), &'static str> {
-        if transmission.status != TransmissionStatus::Transmitted as u8 {
+        if transmission.status != TransmissionStatus::Transmitted as u32 {
             return Err("Transmission is not in transmitted state");
         }
 
         transmission.acknowledged_at = Some(env.ledger().timestamp());
-        transmission.status = TransmissionStatus::Acknowledged as u8;
+        transmission.status = TransmissionStatus::Acknowledged as u32;
 
         Ok(())
     }
 
     /// Mark transmission as failed
     pub fn fail_transmission(
-        env: &Env,
+        _env: &Env,
         transmission: &mut TransmissionRecord,
     ) -> Result<(), &'static str> {
-        transmission.status = TransmissionStatus::Failed as u8;
+        transmission.status = TransmissionStatus::Failed as u32;
         Ok(())
     }
 
@@ -205,17 +203,17 @@ impl IntegrationManager {
     pub fn schedule_retransmission(
         transmission: &mut TransmissionRecord,
     ) -> Result<(), &'static str> {
-        if transmission.status != TransmissionStatus::Failed as u8 {
+        if transmission.status != TransmissionStatus::Failed as u32 {
             return Err("Only failed transmissions can be retried");
         }
 
-        transmission.status = TransmissionStatus::RetransmissionScheduled as u8;
+        transmission.status = TransmissionStatus::RetransmissionScheduled as u32;
         Ok(())
     }
 
     /// Check if transmission is acknowledged
     pub fn is_transmission_acknowledged(transmission: &TransmissionRecord) -> bool {
-        transmission.status == TransmissionStatus::Acknowledged as u8
+        transmission.status == TransmissionStatus::Acknowledged as u32
     }
 
     /// Get transmission age (seconds)
@@ -290,7 +288,7 @@ impl IntegrationManager {
             return false;
         }
 
-        if endpoint.status != EndpointStatus::Connected as u8 {
+        if endpoint.status != EndpointStatus::Connected as u32 {
             return false;
         }
 
@@ -304,14 +302,14 @@ impl IntegrationManager {
         endpoint: &mut RegulatoryEndpoint,
     ) -> Result<(), &'static str> {
         endpoint.last_sync = env.ledger().timestamp();
-        endpoint.status = EndpointStatus::Connected as u8;
+        endpoint.status = EndpointStatus::Connected as u32;
 
         Ok(())
     }
 
     /// Update endpoint status to error
     pub fn endpoint_error(endpoint: &mut RegulatoryEndpoint) {
-        endpoint.status = EndpointStatus::Error as u8;
+        endpoint.status = EndpointStatus::Failed as u32;
     }
 
     /// Check if transmission is overdue for acknowledgment
@@ -382,7 +380,7 @@ mod tests {
                 .unwrap();
 
         assert!(endpoint.is_active);
-        assert_eq!(endpoint.status, EndpointStatus::Connected as u8);
+        assert_eq!(endpoint.status, EndpointStatus::Connected as u32);
     }
 
     #[test]

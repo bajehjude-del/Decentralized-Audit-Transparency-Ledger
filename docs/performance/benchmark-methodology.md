@@ -1,268 +1,323 @@
 # Contract benchmark methodology
 
-How `tools/contract-bench` produces its numbers, what those numbers do and do not
-include, and what would have to change for them to become measurements of the
-deployed contract.
+How the AuditLedger contract benchmarking suite measures performance, what its
+numbers mean, and what the regression gate does and does not check. Issue
+[#406](https://github.com/daddygokings-art/Decentralized-Audit-Transparency-Ledger/issues/406).
 
-## Summary
+## Why a custom harness rather than `cargo bench`
 
-| | |
-|---|---|
-| Tool | `tools/contract-bench` (`audit-ledger-bench`) |
-| Metric source | The Soroban host's own resource meter |
-| Primary metric | Modelled CPU instructions |
-| Secondary | Memory bytes, ledger entries read/written, bytes read/written, event bytes, rent bumps |
-| Regression threshold | 5% |
-| Determinism | Exact — two runs serialise byte-identically apart from the timestamp |
-| Measures the contract's own instructions | **No** — see [Limitations](#limitations) |
+`cargo bench`'s libtest harness answers "how many nanoseconds did this function
+take on this machine". For a deployed contract that is close to the wrong
+question. A user of this contract pays for **Soroban resources** — CPU
+instructions, ledger entries read and written, bytes persisted, and the
+resulting transaction fee — and those are metered by the protocol, not by the
+host clock. Two runs on different hardware produce the same fee; two runs of the
+same function with the same arguments produce the same resource numbers.
+
+So the suite is a plain `fn main()` (`harness = false`) that drives the contract
+through the Soroban host and reads the host's own invocation metering back out.
+Determinism is the whole point: it is what allows a **5%** threshold to be a
+meaningful gate rather than a coin flip.
 
 ## What is measured
 
-Every figure is read back from the Soroban host after it has executed the work,
-never estimated and never timed against a wall clock. Two host views are used:
+Every case records two families of numbers.
 
-- `Env::cost_estimate().budget()` for CPU instructions and memory bytes, reset
-  before each workload.
-- `Env::cost_estimate().resources()` for the resource totals the host computes
-  per invocation, which is the only source of ledger-entry counts and byte
-  volumes.
+### Resource metrics — deterministic, gated
 
-Each benchmark runs its workload as one contract invocation and reads the host's
-meter for that invocation. The meter is per-invocation, so the figure needs no
-arithmetic to isolate the workload: the fixture is excluded because it was a
-different invocation, not because it was subtracted.
+Read from `Env::cost_estimate()` after the invocation, i.e. straight from the
+Soroban host's own budget accounting:
 
-That distinction matters. Differencing two readings subtracts whichever frame ran
-last from whichever ran before it, and the fixture's final frame is usually the
-larger of the two — the difference then comes out *negative*. A measurement that
-reports a negative cost for an append is worse than no measurement, and it is
-exactly what the suite produced before this was corrected.
+| Metric | Meaning |
+| --- | --- |
+| `instructions` | Modelled CPU instructions. The dominant scaling term. |
+| `fee_stroops` | Simulated transaction fee under the mainnet fee schedule. |
+| `memory_read_entries` | In-memory ledger entries touched. |
+| `disk_read_entries` | Ledger entries restored from disk. |
+| `write_entries` | Ledger entries written. |
+| `write_bytes` | Bytes persisted to the ledger. |
+| `contract_events_size_bytes` | Volume of emitted contract events. |
+| `mem_bytes` | Modelled contract memory footprint. |
+| rent volumes | Persistent and temporary rent bumped, in ledger-bytes and bumps. |
 
-`src/measure.rs` holds this, and one of its tests fails if the host ever stops
-reporting a counter — otherwise every number in the suite would silently become
-zero and still pass.
+These depend only on the scenario. They are the numbers the gate compares.
 
-### The suite's measurements
+### Wall-clock metrics — noisy, advisory
 
-| Group | What it covers |
-|---|---|
-| `scenario` | The five required workflows: single event, batch events, queries, governance, archive |
-| `storage` | Each host operation alone: instance and persistent writes, reads, presence checks, packed-index rewrite, rent extension, event emission |
-| `function` | All 120 functions in `abi/audit-ledger.json`, each attributed to a measured cost profile |
-| `wasm` | Module size by section, against a budget |
+`min` / `median` / `mean` / `max` nanoseconds per invocation, plus a `spread`
+ratio `(max - min) / median` used as the suite's noise indicator.
 
-### Scenario coverage
+**These are not gated by default.** They measure the machine that ran the
+benchmark — a shared CI runner, a laptop on battery, a noisy neighbour — not the
+contract. Gating on them would produce failures that have nothing to do with the
+code under test. They are recorded because a case that becomes pathologically
+slow is still worth noticing. Pass `--gate-wall-clock` to
+`detect_regression.py` if you want them in the gate, and expect it to be
+flaky.
 
-Scenarios are measured at more than one ledger size because the contract's cost is
-not constant in its size. `EventTypeIndices` and `SubmitterEventIndices` are packed
-arrays of `u32` order indices that grow by four bytes per event and are **rewritten
-in full on every append**, so an append's cost rises with the ledger behind it. The
-suite measures that growth rather than assuming it away: an append costs about
-1.76M instructions at 100 events and 4.26M at 300.
+### Artifact metrics
 
-The sizes are bounded by the harness, and the bound is worth knowing about. A test
-`Env` meters against the mainnet limits, and its 40 MiB memory budget covers the
-whole environment — the SDK offers no way to widen it. Seeded events cost roughly
-50 KB of metered memory each, so the largest fixture is `MAX_FIXTURE_EVENTS` (400).
-Reads are measured there, because ledger size is the variable they are about.
+* **WASM size** — byte length of the built contract artifact, plus its SHA-256
+  and the budget it is measured against. Because it is a build artifact rather
+  than a timing, it is fully deterministic and *is* gated on growth.
+* **Host peak RSS** — the high-water resident set size of the benchmark process.
+  This is the one memory number that cannot be read in-process, because a process
+  cannot report its own peak. `scripts/bench/run_benchmarks.sh` captures it with
+  GNU `time -f '%M'`; on macOS (where BSD `time` has no such format and there is
+  no `/proc`) the field is simply left empty rather than guessed.
 
-Write paths are measured against smaller fixtures, `WRITE_LEDGER_SIZES` (100 and
-300), and that asymmetry is itself the useful result: **a sixteen-event batch on a
-300-event ledger already holds 33.7 MB of the network's 40 MiB per-invocation
-memory.** Batch length, not ledger size, is what bounds a write on this contract.
-Growing the fixture past 300 makes the batch unmeasurable, not because the batch
-got more expensive but because the harness ran out of budget first.
+## The measurement protocol
 
-So the ladder demonstrates how write and read cost scale with ledger size over the
-range the harness can build, and the per-invocation figures it reports are what a
-larger deployment would also pay per call. What it does not do is measure a
-10 000-event ledger, and the documentation does not claim to.
+Per case, implemented in `bench/benches/support/measure.rs`:
 
-## Limitations
+1. Build a **fresh** `Env` and a freshly deployed contract. Fixture construction
+   is *excluded* from every timing — otherwise deployment cost would be charged
+   to the function under test.
+2. Pre-build every invocation argument in the setup closure. Argument
+   construction is setup, not measurement.
+3. Run `warmup` untimed invocations (default 1) so first-call allocator and
+   codec costs do not land in the sample.
+4. Run `iterations` timed invocations (default 7), each against a fresh fixture.
+5. Read the host metering after the last invocation. The host resets its budget
+   before every top-level invocation, so the numbers describe exactly one call.
 
-Read this before quoting a number.
+Only step 4 is timed, and only the invocation itself.
 
-**The contract's own instructions are not measured.** The `audit-ledger` crate does
-not compile — 417 errors against `soroban-sdk 27.0.6`, and its dev-dependency graph
-does not resolve because `schema-registry-client = "0.12.0"` is not a published
-version. Nothing can be linked against it, so it cannot be called, and its
-arithmetic cannot be metered. The suite transcribes the contract's storage layout
-and host operations from its source into `src/contract.rs` and measures those
-operations in a real host.
+**Determinism is verified, not assumed.** Two independent runs of the same
+commit produce byte-identical resource metrics across every case and every
+resource field. If a future change breaks that property, the gate will start
+producing false positives — which is why the CI job runs the whole suite rather
+than a sampled subset.
 
-**The consequence is a consistent bias, downwards.** The figures capture storage
-traffic, event emission and rent extension. They exclude the contract's validation
-logic, hashing, and any VM execution. Every reported cost is therefore a **lower
-bound** on the deployed contract's real cost. A regression in the measured numbers
-is real; an absence of regression is not proof of a cost that did not grow.
+### Normalisation
 
-This bias is stated inside every result file, in the `model` field, so a number
-cannot be quoted later without it.
-
-**WASM size is currently unenforced.** Size needs a built artifact, and the
-contract cannot be built. The analyzer works — it parses a real section table and
-is tested against compiled modules — but `audit-ledger-bench wasm` reports
-`NOT ENFORCED` rather than a passing result, and the CI step is explicitly
-non-blocking. A budget that silently passed on a missing artifact would be worse
-than no budget.
-
-**Per-function figures are profile costs.** The 120 ABI functions are grouped into
-eleven cost profiles, each measured once and attributed by function name and
-mutability. The attribution is derived and printed in the report rather than
-asserted, so a wrong mapping shows up as an implausible figure instead of passing
-unnoticed. A per-function number is the cost of that function's storage behaviour,
-not a profile of its instructions.
-
-### Why the bias does not defeat the purpose
-
-For a ledger contract the host operations dominate. One `log_event` writes six
-records, extends rent on each, rewrites two index arrays and emits an event;
-the surrounding validation is a handful of comparisons. The parts a change usually
-makes worse — a new index, a larger stored struct, a missing rent extension, an
-event that grew — are the parts this suite measures. What it will not catch is
-regression in the contract's own compute, and it will not quantify the absolute
-fee of a transaction.
-
-## Why not wall-clock time
-
-The issue asks for a 5% regression threshold. For timings that threshold would be
-unusable: run-to-run variance on a shared CI runner routinely exceeds it, so the
-gate would fail at random, get muted, and protect nothing.
-
-The quantities compared here are metered by the host and are deterministic. The
-suite's tests assert that two complete runs serialise byte-identically — not merely
-that they compare equal, and with different timestamps, so that nondeterminism in
-serialization order is caught as well. A 5% move is therefore a change in
-behaviour rather than in the machine, which is what makes the threshold
-meaningful.
-
-A wall-clock measurement is still worth having for questions this suite cannot
-answer — real transaction latency, RPC round trips, and how the deployed contract
-performs on real hardware. `scripts/benchmark.sh` runs against testnet for that,
-and its numbers are not comparable with anything here.
-
-## Regression detection
-
-A metric moving **up** is a regression, because every metric in the suite is a
-cost. A metric moving **down** never fails the build: a suite that fails when the
-contract gets cheaper is a suite that gets disabled. Direction is explicit per
-metric rather than inferred.
-
-Four cases are handled distinctly, because collapsing them into "equal" is how a
-suite rots:
-
-| Case | Treatment | Fails? |
-|---|---|---|
-| Metric up by more than 5% | Regression | **Yes** |
-| Metric up by 5% or less | Within threshold | No |
-| Metric down past the threshold | Improvement | No — but reported |
-| Benchmark is new | Added | No — informational |
-| Benchmark disappeared | Removed | No — coverage loss, reported |
-| Result recorded no value (e.g. no WASM) | Unavailable | No — never compared against zero |
-| Baseline is zero, now non-zero | Regression | **Yes** |
-
-That last row matters. A percentage change from zero is undefined, and treating it
-as neutral would let a benchmark start costing something without anyone noticing.
-So zero-to-nonzero is a regression even though no percentage exists.
-
-### The baseline is never updated automatically
-
-`data/baseline.json` changes only when someone runs `audit-ledger-bench promote`.
-Nothing in CI re-baselines after a run, and the weekly job only proposes it.
-
-A suite that re-baselines itself cannot catch a slow regression: each run blesses
-the previous one, and the numbers ratchet upward one sub-threshold step at a time,
-permanently 4% below the alert threshold. Accepting a new cost is a decision a
-person makes on purpose.
-
-## History and visualisation
+Most cases measure one invocation of one entry point. Cases that produce many
+units — a batch of 50 events, a page of 30 results, a 25-event cleanup — are
+reported both as a whole (`invocation`) and **per unit** (`event`, `page`):
 
 ```
-tools/contract-bench/data/
-  baseline.json          the accepted reference
-  history/<stamp>.json   every run, retained
+per_unit.X = invocation.X / unit_count
 ```
 
-Three renderings, all derived from the same data so they cannot disagree:
+`per_unit` is the headline comparison key. It is what makes "50 events in one
+call" directly comparable to "1 event per call", and it is what exposes a batch
+entry point that fails to amortise its fixed per-invocation cost.
 
-- **Markdown report** — for a reviewer in a CI log or a job summary.
-- **SVG chart** — written as text with no dependencies, so history is visible in a
-  pull request with no rendering toolchain. Byte-stable across runs for the same
-  data, which is what lets a retained run be committed and diffed.
-- **Prometheus exposition** — pushed to a Pushgateway when `GRAFANA_PUSH_URL` and
-  `GRAFANA_PUSH_TOKEN` are set. The benchmark id becomes a label rather than part
-  of the series name, so series stay joinable across runs.
+**Ledger entry counts are the exception and are deliberately *not* divided.**
+`write_entries`, `memory_read_entries`, `disk_read_entries` and the rent-bump
+counts describe the invocation as a whole, not the amount of work it carried.
+Dividing them is not merely lossy but inverted in meaning: a 5-event batch that
+writes 2 entries becomes `2 / 5 == 0` under integer division, which reads as
+"this call writes nothing" when the truth is "this call amortises its writes
+across the batch". So those columns are reported **per invocation** and labelled
+as such (`wr/inv`, `rd/inv` in the console table, `*_entries_per_invocation` in
+the CSV). The volume metrics — instructions, fee, bytes, event volume, rent —
+are divided, because they do scale with the work done.
 
-`audit-ledger-bench dashboard --output dashboard.json` emits a Grafana dashboard
-definition for those metrics: instruction cost per scenario, storage traffic,
-metered memory, the WASM budget, and a per-function table by profile. It is a
-separate command from `report` because it is a different artifact — one is read by
-a person, the other is imported into Grafana.
+The result is visible directly in the numbers: a single `log_event` costs
+2,260,724 stroops, while a 20-event `log_events` batch costs 153,723 stroops
+*per event* while still performing only 2 ledger writes for the whole call.
+
+
+## Scenario coverage
+
+`cargo bench -p audit-ledger-bench --list-suites` prints the groups. There are
+199 cases across seven:
+
+| Suite | Covers |
+| --- | --- |
+| `single_event` | The `log_event` write path: metadata size sweep, dedup hit vs `force`, hierarchy, nonce, signed events, TTL shadow copies, RBAC, schema validation, emission modes. |
+| `batch` | `log_events` amortisation from 1 to 50 events, including sizes past the mainnet write-entry budget (measured with limit enforcement disabled, so the cost curve is still visible). |
+| `queries` | Read paths: point lookups, range scans, pagination, filtering, aggregate statistics, and their scaling as the ledger grows. |
+| `governance` | Owner and multi-sig administration: schema registry, RBAC, proposal lifecycle, webhooks, snapshots, version tagging and rollback. |
+| `archive` | Archival and retrieval: compression modes, checksums, listing, purging, and snapshot verify. |
+| `storage` | Storage shape: instance vs persistent, write- and read-path scaling at 2/5/10/25 events, integrity verification — the suite that answers "is any index making this O(n) per call?". |
+| `limits` | Where the contract *stops accepting* a call: the largest accepted metadata payload, the global event cap boundary, and the cheapest authorisation rejection. |
+
+`limits` deserves a note. Its rejection cases are declared `expect_panic`, and
+the harness **fails the run if a rejection stops happening**. A limit case that
+quietly starts succeeding means the recorded boundary is stale, and that is a
+regression in the coverage itself, not a passing test.
 
 ## Running it
 
 ```bash
-cd tools/contract-bench
+# Full run: builds the WASM, benchmarks, archives, checks for regressions
+scripts/bench/run_benchmarks.sh
 
-cargo test                                     # 96 unit + 18 pipeline tests
-cargo run --release --bin audit-ledger-bench -- run          # measure and compare
-cargo run --release --bin audit-ledger-bench -- report       # Markdown report
-cargo run --release --bin audit-ledger-bench -- compare FILE # gate a results file
-cargo run --release --bin audit-ledger-bench -- dashboard   # Grafana dashboard JSON
-cargo run --release --bin audit-ledger-bench -- history --ascii
-cargo run --release --bin audit-ledger-bench -- wasm         # size and budget
-cargo run --release --bin audit-ledger-bench -- export       # Prometheus text
-cargo run --release --bin audit-ledger-bench -- promote      # accept as baseline
+# Just measure, no gate (useful while iterating on a scenario)
+scripts/bench/run_benchmarks.sh --baseline-only
 
-cargo bench --bench scenarios
-cargo bench --bench functions
-cargo bench --bench storage
+# One group, more samples
+BENCH_SUITES=batch BENCH_ITERATIONS=20 scripts/bench/run_benchmarks.sh
+
+# Deliberately accept the current numbers as the new reference
+scripts/bench/run_benchmarks.sh --update-baseline
+
+# A single case, by substring
+cargo bench -p audit-ledger-bench --bench contract_bench -- --filter log_event/meta
 ```
 
-`scripts/ci/benchmark_regression_check.sh` is the standalone gate. It previously
-exited 0 without comparing anything, at a 10% threshold; it now delegates to the
-suite at 5% and fails on a real regression.
+Harness flags, each with an environment-variable equivalent so CI can vary a run
+without changing the case list:
+
+| Flag | Env | Default |
+| --- | --- | --- |
+| `--iterations N` | `BENCH_ITERATIONS` | 7 |
+| `--warmup N` | `BENCH_WARMUP` | 1 |
+| `--filter SUBSTR` | `BENCH_FILTER` | all |
+| `--suite NAME[,NAME]` | `BENCH_SUITES` | all |
+| `--out-dir DIR` | `BENCH_OUT_DIR` | `benchmarks/results` |
+| `--fail-fast` | `BENCH_FAIL_FAST` | off |
+| `--list-suites` | — | — |
+
+The harness has no libtest harness, so it exits `0` on success, `1` on a
+measurement failure or a detected limit drift, and `2` on bad arguments.
+
+### Outputs
+
+| File | Purpose |
+| --- | --- |
+| `benchmark-report.json` | The canonical report. Versioned by `schema_version`; the regression tooling refuses to compare incompatible versions. |
+| `benchmark-report.csv` | Flat per-case comparison keys, for a spreadsheet or a quick diff. |
+| `benchmark-report.md` | Human-readable table; appended to the CI job summary. |
+| `regression.md` | The pass/fail comparison against the baseline. |
+| `regression-summary.json` | Machine-readable verdict, consumed by the Grafana dashboard. |
+| `benchmark-metrics.prom` | Prometheus exposition for the dashboard. |
+
+## Regression detection
+
+`scripts/bench/detect_regression.py` compares the current report against
+`benchmarks/baseline.json`.
+
+**The default threshold is 5%**, from the issue's budget. A case's metric must
+grow by more than 5% to fail. Changes in either direction beyond the threshold
+are reported; only growth fails.
+
+Compared per case, on the **per-unit** view:
+
+`instructions`, `fee_stroops`, `memory_read_entries`, `write_entries`,
+`write_bytes`, `disk_read_entries`, `contract_events_size_bytes` — plus WASM
+artifact size at the report level.
+
+Deliberate decisions:
+
+* **The baseline never moves automatically.** A baseline that is rewritten
+  whenever a run regresses cannot detect a regression. Promotion is always
+  explicit: `--update-baseline` locally, or a manual `workflow_dispatch` on the
+  CI workflow.
+* **A missing case is a warning, not a failure.** If a case disappears, the suite
+  reports it loudly — that case is no longer regression-checked, which is a hole
+  in the coverage. But deleting a case is a legitimate thing to do, so it does
+  not by itself fail the build.
+* **A new case is informational.** It has nothing to compare against yet. It
+  becomes comparable once it is promoted into the baseline.
+* **Cases that errored or asserted a limit are skipped**, on both sides. They
+  carry no comparable numbers, and comparing them would produce nonsense.
+* **A metric that was free and now costs something** counts as a regression
+  rather than dividing by zero.
+
+Exit codes: `0` clean, `1` regression found, `2` the inputs could not be used.
 
 ## CI
 
-`.github/workflows/contract-benchmarks.yml` runs on pull requests touching the
-contract, the IDL or the suite, and weekly for drift nobody changed. It formats,
-lints and tests the suite; measures; runs the three `cargo bench` targets; emits
-GitHub annotations so a regression appears on the diff; uploads the JSON, the
-chart and the metrics; and attempts a Grafana push when configured.
+`.github/workflows/contract-benchmarks.yml` runs on pull requests that touch
+`src/`, `bench/`, `scripts/bench/`, `Cargo.toml`/`Cargo.lock` or the baseline,
+and weekly on a schedule.
 
-The job does not fail at the moment a regression is found. A regression is the one
-result this workflow most needs to report on, so the report, the job summary and
-the measurement artifacts are all still produced, and a final step fails the run
-once the evidence has been collected. A red build with no explanation of what
-changed is the outcome this ordering avoids.
+* The **Regression gate** job builds the WASM, runs the suite, and fails the PR
+  on a regression. It appends the comparison table to the job summary and emits
+  `::warning` annotations so a regression is visible inline on the diff.
+* The **Historical snapshot** job (scheduled and manual runs only) commits a
+  dated report into `benchmarks/history/`. It runs even when the gate fails,
+  because the failing run is exactly the one you will want to compare against
+  later.
 
-The weekly schedule exists because a dependency or cost-model change arrives with
-no diff for a reviewer to look at.
+Baseline promotion is a deliberate `workflow_dispatch` input, never automatic.
 
-## Making this measure the real contract
+## Historical tracking and visualisation
 
-In rough order of value:
+Two layers, because they answer different questions:
 
-1. **Make `audit-ledger` compile.** Fix the dev-dependency graph first:
-   `schema-registry-client = "0.12.0"` is not a published version. Behind that
-   sit the 417 contract errors, most likely a `soroban-sdk` version mismatch given
-   the number of them.
-2. **Move the integration-test dependencies behind a feature flag.** Every one of
-   them — testcontainers, Kafka, Pulsar, Postgres, Redis — is a dev-dependency
-   used by a handful of test files. A benchmark or unit-test run should not need
-   to resolve them, and they are the reason the graph does not resolve at all.
-3. **Call the contract from the harness.** With the contract compiling,
-   `scenarios.rs` can invoke `AuditLedgerClient` instead of the operation model in
-   `src/contract.rs`. The measurement code does not change — only the workload —
-   so this is a contained change, and the `model` field in the result file is what
-   records that the switch has been made.
-4. **Measure on a network.** The SDK's own documentation notes that a native test
-   contract under-reports against its WASM equivalent, because VM instantiation,
-   module parsing and rent bumps on the module itself are not modelled. A
-   `soroban contract invoke --simulate-only` sweep would close that gap, and
-   `scripts/benchmark.sh` is the right shape for it.
+1. **Committed snapshots** — `benchmarks/history/YYYY-MM-DD.json`, written by the
+   weekly job. This is the durable record: "which release got slower?" is
+   answerable from the repository itself, without a metrics backend.
+2. **Prometheus/Grafana** — `scripts/bench/prometheus_exposition.py` converts a
+   report to Prometheus text exposition, and `run_benchmarks.sh` can push it to a
+   Pushgateway (`--pushgateway URL`). The dashboard is
+   `monitoring/grafana/dashboards/contract-benchmarks.json`: a gate status tile,
+   the most expensive entry points by instructions and fee, storage read/write
+   traffic, the historical trend, and an explicitly-labelled advisory row for
+   wall-clock.
 
-Until step 3, treat every figure as a relative signal for the host operations the
-contract performs — which is what the regression gate is for — and not as an
-estimate of what a transaction will cost.
+Reconstructing the exposition from the committed history is one command, with no
+metrics backend at all:
+
+```bash
+scripts/bench/prometheus_exposition.py --history benchmarks/history --print
+```
+
+## Known limitations
+
+* **The WASM artifact currently exceeds the 128 KiB budget the `wasm-size` CI job
+  enforces** — the contract builds at roughly 353 KiB. The suite reports this
+  honestly (`within_limit: false`) rather than hiding it, and the regression gate
+  keys on *growth* rather than on the absolute budget, so an already-over-budget
+  artifact still gets tracked properly. Bringing the artifact under budget is a
+  separate piece of work from measuring it; see
+  [contract size reduction](#contract-size-reduction).
+* **Wall-clock numbers are not comparable across machines.** They are only
+  meaningful against another run of the same case on similar hardware, which is
+  why they are advisory.
+* **The fee schedule is a snapshot.** `fee_stroops` reflects the fee parameters
+  compiled into the SDK version under test. A network fee-schedule change moves
+  it without any contract change.
+* **The suite measures one deployment configuration.** `initialize` is called
+  with a 4 KiB metadata cap and a 100 000-event cap. Different caps change the
+  costs; the `limits` suite exists to make the boundary explicit.
+* **Rejections carry no cost.** A case that the contract refuses is not a data
+  point about resource usage — it records which limit tripped, and nothing else.
+
+<a id="contract-size-reduction"></a>
+## Contract size reduction
+
+The `AuditLedger` contract is built as a `cdylib`, and a Soroban WASM exposes a
+single contract interface. The crate also contains several *standalone*
+contracts (`contract_event_privacy`, `privacy_preserving_analytics`,
+`data_governance`, `multi_tenant`), each with its own `#[contractimpl]`.
+
+Compiling all of them into one WASM is both semantically wrong and the main
+driver of the artifact's size. They are therefore gated behind cargo features
+that are enabled for host test builds and opt-in for feature-gated builds:
+
+```toml
+[features]
+contract-event-privacy = []
+privacy-analytics      = []
+data-governance        = []
+multi-tenant           = []
+```
+
+That removed the invalid multi-contract artifact, but the remaining contract is
+still over budget, so the next levers are: dropping unused dependencies from the
+WASM build, `[profile.release]` tuning beyond `opt-level = "z"`, and splitting
+the optional modules into genuinely separate packages. Until that is done, the
+`wasm-size` job in `.github/workflows/test.yml` is expected to fail; the
+benchmark suite's job here is to make the size measurable and to catch it
+growing, not to hide the failure.
+
+## Adding a case
+
+1. Put it in the suite that matches its question, or add a suite if the question
+   is new. Add the name to `SUITES` in `bench/benches/suites/mod.rs`.
+2. Name it `group/thing` and keep the name **stable** — it is the regression key,
+   and renaming a case silently drops its history.
+3. Record a `notes` string saying *why* the case exists, not what it does.
+4. Use `measure` when the operation takes an extra iteration argument, and
+   `measure_call` otherwise.
+5. Set `unit` to `event` or `page` when the invocation produces many units, so the
+   per-unit view is meaningful.
+6. If the case is asserting a *limit* rather than a cost, use `expect_panic` and
+   a note naming the limit.
+7. Run it, read the numbers, and only then decide whether it belongs in the
+   baseline.

@@ -3,7 +3,6 @@
 //! Manages tax audit events, compliance documentation, and decision trails
 
 use soroban_sdk::{contracttype, Env, Address, Symbol, Bytes, Vec, BytesN};
-use crate::tax::TaxAuditEvent;
 
 /// Tax Audit Log Entry
 #[contracttype]
@@ -148,10 +147,10 @@ impl TaxAuditTrailHelper {
         actor: Address,
     ) -> TaxAuditLogEntry {
         let mut details = Bytes::new(env);
-        details = details.try_extend_from_slice(&rate.to_le_bytes()).unwrap();
+        details.extend_from_slice(&rate.to_le_bytes());
 
         TaxAuditLogEntry {
-            id: BytesN::from_array([0u8; 32]),
+            id: BytesN::from_array(&env, &[0u8; 32]),
             event_id: transaction_id,
             event_type: Symbol::new(env, "vat_determined"),
             entity: actor.clone(),
@@ -168,14 +167,14 @@ impl TaxAuditTrailHelper {
     pub fn record_dst_calculation(
         env: &Env,
         transaction_id: BytesN<32>,
-        jurisdiction: Symbol,
+        _jurisdiction: Symbol,
         applicable: bool,
-        rate: u32,
-        amount: u64,
+        _rate: u32,
+        _amount: u64,
         actor: Address,
     ) -> TaxAuditLogEntry {
         TaxAuditLogEntry {
-            id: BytesN::from_array([0u8; 32]),
+            id: BytesN::from_array(&env, &[0u8; 32]),
             event_id: transaction_id,
             event_type: Symbol::new(env, "dst_calculated"),
             entity: actor.clone(),
@@ -193,13 +192,13 @@ impl TaxAuditTrailHelper {
         env: &Env,
         transaction_id: BytesN<32>,
         holder: Address,
-        transaction_type: Symbol,
-        gain_loss: i64,
+        _transaction_type: Symbol,
+        _gain_loss: i64,
         reportable: bool,
         actor: Address,
     ) -> TaxAuditLogEntry {
         TaxAuditLogEntry {
-            id: BytesN::from_array([0u8; 32]),
+            id: BytesN::from_array(&env, &[0u8; 32]),
             event_id: transaction_id,
             event_type: Symbol::new(env, "crypto_transaction"),
             entity: holder,
@@ -216,13 +215,13 @@ impl TaxAuditTrailHelper {
     pub fn record_transfer_pricing(
         env: &Env,
         transaction_id: BytesN<32>,
-        jurisdiction: Symbol,
+        _jurisdiction: Symbol,
         defensible: bool,
-        variance: i64,
+        _variance: i64,
         actor: Address,
     ) -> TaxAuditLogEntry {
         TaxAuditLogEntry {
-            id: BytesN::from_array([0u8; 32]),
+            id: BytesN::from_array(&env, &[0u8; 32]),
             event_id: transaction_id,
             event_type: Symbol::new(env, "transfer_pricing"),
             entity: actor.clone(),
@@ -240,11 +239,11 @@ impl TaxAuditTrailHelper {
         env: &Env,
         report_id: BytesN<32>,
         entity: Address,
-        fiscal_year: u32,
+        _fiscal_year: u32,
         actor: Address,
     ) -> TaxAuditLogEntry {
         TaxAuditLogEntry {
-            id: BytesN::from_array([0u8; 32]),
+            id: BytesN::from_array(&env, &[0u8; 32]),
             event_id: report_id,
             event_type: Symbol::new(env, "cbcr_filed"),
             entity,
@@ -271,7 +270,7 @@ impl TaxAuditTrailHelper {
         let retention_seconds = (retention_years as u64) * 31_557_600;
 
         TaxDocumentation {
-            id: BytesN::from_array([0u8; 32]),
+            id: BytesN::from_array(&env, &[0u8; 32]),
             related_event: event_id,
             document_type,
             content_hash,
@@ -292,7 +291,7 @@ impl TaxAuditTrailHelper {
         due_date: u64,
     ) -> TaxComplianceEvent {
         TaxComplianceEvent {
-            id: BytesN::from_array([0u8; 32]),
+            id: BytesN::from_array(&env, &[0u8; 32]),
             entity,
             timestamp: env.ledger().timestamp(),
             event_type,
@@ -319,7 +318,7 @@ impl TaxAuditTrailHelper {
         let appeal_end = now + (30 * 24 * 3600);
 
         TaxDeterminationDecision {
-            id: BytesN::from_array([0u8; 32]),
+            id: BytesN::from_array(&env, &[0u8; 32]),
             transaction_id,
             tax_type,
             jurisdiction,
@@ -346,7 +345,7 @@ impl TaxAuditTrailHelper {
         let expiry_seconds = (expiry_years as u64) * 31_557_600;
 
         TaxExemptionRecord {
-            id: BytesN::from_array([0u8; 32]),
+            id: BytesN::from_array(&env, &[0u8; 32]),
             entity,
             exemption_type,
             jurisdiction,
@@ -371,7 +370,7 @@ mod tests {
         
         let log = TaxAuditTrailHelper::record_vat_determination(
             &env,
-            BytesN::from_array([0u8; 32]),
+            BytesN::from_array(&env, &[0u8; 32]),
             Symbol::new(&env, "EU"),
             2000,
             200,
@@ -388,9 +387,9 @@ mod tests {
         let env = Env::default();
         let doc = TaxAuditTrailHelper::create_documentation(
             &env,
-            BytesN::from_array([0u8; 32]),
+            BytesN::from_array(&env, &[0u8; 32]),
             Symbol::new(&env, "vat_return"),
-            BytesN::from_array([1u8; 32]),
+            BytesN::from_array(&env, &[1u8; 32]),
             Symbol::new(&env, "EU"),
             6,
         );

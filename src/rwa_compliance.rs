@@ -10,6 +10,7 @@ use crate::rwa_types::{
     ComplianceCheck, ComplianceFramework, InvestorProfile, KycTier, RwaToken, TokenizationStatus,
 };
 use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::xdr::ToXdr;
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
 
@@ -325,7 +326,7 @@ impl ComplianceEngine {
 
     fn compute_profile_id(env: &Env, address: &Address) -> BytesN<32> {
                 let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, address.to_xdr().as_ref()));
+        input.append(&address.to_xdr(env));
         input.append(&Bytes::from_slice(
             env,
             &env.ledger().timestamp().to_le_bytes(),

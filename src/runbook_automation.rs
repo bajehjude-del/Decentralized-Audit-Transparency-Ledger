@@ -13,7 +13,7 @@
 
 #![no_std]
 use soroban_sdk::{
-    contracterror, contracttype, panic_with_error, Address, Bytes, BytesN, Env, Symbol, Vec,
+    contracterror, contracttype, panic_with_error, Address, Bytes, BytesN, Env, Symbol,
 };
 
 // ── Error Codes ──────────────────────────────────────────────────────────
@@ -452,7 +452,7 @@ impl RunbookAutomation {
         env: &Env,
         operator: Address,
         runbook_id: BytesN<32>,
-        rollback_reason: Bytes,
+        _rollback_reason: Bytes,
     ) -> RunbookExecutionRecord {
         operator.require_auth();
 

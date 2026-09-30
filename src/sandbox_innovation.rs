@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{contracttype, Bytes, BytesN};
 
 /// Innovation metric tracking.
 #[contracttype]
@@ -26,10 +26,11 @@ pub struct InnovationMetrics {
 
 impl InnovationMetrics {
     pub fn overall_innovation_score(&self) -> u32 {
-        (self.impact_score as u64
+        ((self.impact_score as u64
             + self.market_readiness as u64
             + self.tech_maturity as u64
-            + self.user_adoption as u64) / 4 as u64 as u32
+            + self.user_adoption as u64)
+            / 4).try_into().unwrap()
     }
 
     pub fn is_ready_for_mainnet(&self) -> bool {

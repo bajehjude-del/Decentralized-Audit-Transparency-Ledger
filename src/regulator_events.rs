@@ -10,7 +10,7 @@ use crate::regulator::{
 
 /// Predefined ISA 3000 control objectives
 /// Based on International Standard on Assurance Engagements 3000 (Revised)
-#[contracttype]
+// Namespace for reference implementations, not a contract type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ISA3000Objectives {
     // Not explicitly indexed - these are reference implementations
@@ -95,7 +95,7 @@ impl ISA3000Objectives {
 
 /// Predefined SOC 2 criteria
 /// Based on AICPA Trust Service Criteria
-#[contracttype]
+// Namespace for reference implementations, not a contract type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SOC2Criteria {
     // Reference implementations for SOC 2 criteria

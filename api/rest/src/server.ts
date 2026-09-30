@@ -3,6 +3,7 @@ import cors from "cors";
 import fs from "fs";
 import path from "path";
 import yaml from "js-yaml";
+import helmet from "helmet";
 
 import { EVENT_LOGGED, pubsub, resolvers } from "../../graphql/src/resolvers";
 import {
@@ -30,7 +31,12 @@ import {
 } from "@audit-ledger/security";
 import { authorizationServer, OAUTH_ISSUER, wafRuleEngine, createConfiguredRateLimitStore } from "./security";
 import { createComplianceRouter } from "./compliance";
+
 import { createReplayRouter } from "./replay";
+import { createConfidentialRouter } from "./confidential";
+import { createAggregationRouter } from "./aggregation";
+
+
 import {
   createCacheStore,
   createCacheBackedMiddleware,
@@ -45,6 +51,61 @@ const port = process.env.PORT || 3002;
 app.use(cors());
 app.use(express.json());
 
+// ── Baseline security headers (ZAP 10055 / 10063 / 10037 / 10049) ───────────
+// - Content-Security-Policy with default-src fallback (fixes 10055)
+// - Permissions-Policy header (fixes 10063)
+// - Removes X-Powered-By (fixes 10037, also covered by app.disable above)
+// - Cache-Control hardening for storable/cacheable content (fixes 10049)
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        fontSrc: ["'self'", "https:", "data:"],
+        formAction: ["'self'"],
+        frameAncestors: ["'self'"],
+        imgSrc: ["'self'", "data:"],
+        objectSrc: ["'none'"],
+        scriptSrc: ["'self'"],
+        scriptSrcAttr: ["'none'"],
+        styleSrc: ["'self'", "https:", "'unsafe-inline'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+    crossOriginEmbedderPolicy: true,
+    crossOriginOpenerPolicy: true,
+    crossOriginResourcePolicy: { policy: "same-origin" },
+    referrerPolicy: { policy: "no-referrer" },
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+    noSniff: true,
+    frameguard: { action: "deny" },
+    hidePoweredBy: true,
+  })
+);
+
+app.use((_req, res, next) => {
+  res.setHeader(
+    "Permissions-Policy",
+    "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+  );
+  next();
+});
+
+// ── Cross-Origin isolation headers (COEP / COOP / CORP) ─────────────────────
+// ZAP baseline flags missing/invalid Cross-Origin-Embedder-Policy,
+// Cross-Origin-Opener-Policy, and Cross-Origin-Resource-Policy headers.
+// These are set globally so every response (including /, /robots.txt,
+// /sitemap.xml, and API routes) carries them.
+
+app.use((_req, res, next) => {
+  res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  next();
+});
+
 // ── Security headers + CSP (nonces, report-only mode, violation reporting) ─
 
 app.use(securityHeaders());
@@ -55,6 +116,18 @@ app.use(
     reportToGroup: "csp-endpoint",
   })
 );
+
+// ZAP baseline: ensure Permissions-Policy is always present and CSP has
+// fallbacks for directives that would otherwise inherit from default-src.
+app.use((_req, res, next) => {
+  if (!res.getHeader("Permissions-Policy")) {
+    res.setHeader(
+      "Permissions-Policy",
+      "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    );
+  }
+  next();
+});
 
 const cspViolationStore = new ViolationReportStore();
 app.post(
@@ -98,6 +171,18 @@ app.use(
   })
 );
 
+// ZAP 10049: prevent caching of dynamic API responses. Static assets are
+// served by the frontend; every REST response here is user- or
+// state-dependent, so mark it non-storable and non-cacheable.
+app.use((_req, res, next) => {
+  if (!res.getHeader("Cache-Control")) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+  }
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  next();
+});
+
 // ── Per-client quotas with token-bucket burst handling (#444) ────────────────
 // On top of the global limiter above, each client (API key role, explicit
 // x-quota-tier header, or "default") gets its own token bucket with burst
@@ -137,6 +222,9 @@ v1Admin.use("/waf", requireScopes(["admin:waf"]), requireRole("admin"), wafAdmin
 app.use("/v1/admin", v1Admin);
 app.use("/v1", createComplianceRouter());
 app.use("/v1", createReplayRouter());
+app.use("/v1", createConfidentialRouter());
+app.use("/v1", createAggregationRouter());
+
 
 function resolveContext(req: express.Request): { apiKey?: string; role?: Role } {
   const apiKey = (req.headers["x-api-key"] ?? req.headers["authorization"]?.replace("Bearer ", "")) as string | undefined;
@@ -149,10 +237,22 @@ function resolveContext(req: express.Request): { apiKey?: string; role?: Role } 
 
 const startTime = Date.now();
 
+// Ensure every response (including static-ish endpoints below) carries the
+// baseline hardening headers ZAP flags: no X-Powered-By, a Permissions-Policy,
+// and explicit no-store caching for dynamic content.
+app.use((_req, res, next) => {
+  res.removeHeader("X-Powered-By");
+  res.setHeader("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()");
+  next();
+});
+
 app.get(["/", "/robots.txt", "/sitemap.xml"], (req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
+  res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
   if (req.path === "/robots.txt") {
     return res.type("text/plain").send("User-agent: *\nDisallow: /");
   }

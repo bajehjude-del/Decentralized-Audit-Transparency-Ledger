@@ -1,0 +1,28 @@
+{
+  "name": "@audit-ledger/event-audit-log",
+  "version": "1.0.0",
+  "description": "Tamper-evident contract event audit logging with structured formats, SIEM delivery, long-term retention, and compliance reporting",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "keywords": [
+    "audit-ledger",
+    "contract-events",
+    "audit-log",
+    "tamper-evident",
+    "compliance",
+    "siem",
+    "retention"
+  ],
+  "author": "Audit Ledger Contributors",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.6.0"
+  }
+}

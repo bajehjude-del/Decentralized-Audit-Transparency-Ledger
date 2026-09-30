@@ -5,7 +5,7 @@ This document provides a comprehensive reference for all 18 `ContractError` vari
 ## Error Table
 
 | Code | Variant | Description | Common Cause | Resolution |
-|------|---------|-------------|--------------|-----------|
+|------|---------|-------------|-------------|------------|
 | 1 | `CallerNotOwner` | Caller does not have owner privileges | Non-owner attempting governance function | Contact current owner for delegation, or ensure caller is authorized |
 | 2 | `GlobalMaxLogsReached` | Global event log capacity reached | Total events ≥ `global_max_logs` | Owner should increase cap or archive off-chain |
 | 3 | `EventTypeMaxLogsReached` | Per-event-type log capacity reached | Event type count ≥ type-specific cap | Owner should increase cap or call `remove_event_cap` |
@@ -30,10 +30,10 @@ This document provides a comprehensive reference for all 18 `ContractError` vari
 ### Retriable Errors
 
 Errors that may succeed on retry (after state change or time):
-- **Code 2** (`GlobalMaxLogsReached`) — Retry after owner increases `global_max_logs`
-- **Code 3** (`EventTypeMaxLogsReached`) — Retry after owner increases type cap or calls `remove_event_cap`
-- **Code 13** (`ContractPaused`) — Retry after owner resumes contract
-- **Code 14** (`RateLimitExceeded`) — Retry in next ledger or after rate limit adjustment
+- **Code 2** (`GlobalMaxLogsReached`) — retry after owner increases `global_max_logs`
+- **Code 3** (`EventTypeMaxLogsReached`) — retry after owner increases type cap or calls `remove_event_cap`
+- **Code 13** (`ContractPaused`) — retry after owner resumes contract
+- **Code 14** (`RateLimitExceeded`) — retry in next ledger or after rate limit adjustment
 
 ### Non-Retriable Errors
 
@@ -41,7 +41,7 @@ Errors that require corrective action before retry:
 - **Code 1** (`CallerNotOwner`) — Caller must be authorized as owner
 - **Code 4** (`EventDoesNotExist`) — Event does not exist; verify correct ID
 - **Code 5** (`EventTypeIndexOutOfBounds`) — Index is invalid; use lower index
-- **Code 6** (`NewOwnerIsZero`) — Provide valid owner address
+- **Code 6** (`NewOwnerIsZero`) — provide valid owner address
 - **Code 7** (`CapNotSet`) — Use `set_event_max_logs()` first
 - **Code 8** (`MetadataTooLarge`) — Reduce metadata or increase limit
 - **Code 9** (`ContractNotInitialized`) — Call `initialize()` first

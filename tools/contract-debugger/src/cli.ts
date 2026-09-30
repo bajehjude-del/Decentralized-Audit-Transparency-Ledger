@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { readFileSync } from 'fs';
 import { DebugSession, Breakpoint } from './engine/session';
 import { loadTrace, serializeTrace } from './trace/load';

@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Symbol};
+use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, contracttype};
 
 /// Represents supported CBDC pilots globally.
 #[contracttype]
@@ -18,12 +18,12 @@ pub enum CBDCPilot {
 }
 
 impl CBDCPilot {
-    pub fn as_symbol(&self) -> Symbol {
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
         match self {
-            CBDCPilot::DigitalEuro => Symbol::new(&[b"EUR"]),
-            CBDCPilot::DigitalDollar => Symbol::new(&[b"USD"]),
-            CBDCPilot::eCNY => Symbol::new(&[b"CNY"]),
-            CBDCPilot::SandDollar => Symbol::new(&[b"BSD"]),
+            CBDCPilot::DigitalEuro => Symbol::new(env, "EUR"),
+            CBDCPilot::DigitalDollar => Symbol::new(env, "USD"),
+            CBDCPilot::eCNY => Symbol::new(env, "CNY"),
+            CBDCPilot::SandDollar => Symbol::new(env, "BSD"),
         }
     }
 
@@ -72,13 +72,18 @@ pub enum InteropProtocol {
 }
 
 impl InteropProtocol {
-    pub fn as_symbol(&self) -> Symbol {
+    /// Short on-chain code for this protocol.
+    pub fn as_str(&self) -> &'static str {
         match self {
-            InteropProtocol::AtomicSwap => Symbol::new(&[b"ATOMIC_SWAP"]),
-            InteropProtocol::HubAndSpoke => Symbol::new(&[b"HUB_SPOKE"]),
-            InteropProtocol::ISO20022 => Symbol::new(&[b"ISO_20022"]),
-            InteropProtocol::CBPR => Symbol::new(&[b"CBPR"]),
+            InteropProtocol::AtomicSwap => "ATOMIC_SWAP",
+            InteropProtocol::HubAndSpoke => "HUB_SPOKE",
+            InteropProtocol::ISO20022 => "ISO_20022",
+            InteropProtocol::CBPR => "CBPR",
         }
+    }
+
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
+        Symbol::new(env, self.as_str())
     }
 
     pub fn version(&self) -> &'static str {
@@ -107,13 +112,18 @@ pub enum PrivacyTier {
 }
 
 impl PrivacyTier {
-    pub fn as_symbol(&self) -> Symbol {
+    /// Short on-chain code for this privacy tier.
+    pub fn as_str(&self) -> &'static str {
         match self {
-            PrivacyTier::Public => Symbol::new(&[b"PUBLIC"]),
-            PrivacyTier::Pseudonymous => Symbol::new(&[b"PSEUDO"]),
-            PrivacyTier::Private => Symbol::new(&[b"PRIVATE"]),
-            PrivacyTier::RegulatoryConfidential => Symbol::new(&[b"REGUL"]),
+            PrivacyTier::Public => "PUBLIC",
+            PrivacyTier::Pseudonymous => "PSEUDO",
+            PrivacyTier::Private => "PRIVATE",
+            PrivacyTier::RegulatoryConfidential => "REGUL",
         }
+    }
+
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
+        Symbol::new(env, self.as_str())
     }
 
     pub fn requires_encryption(&self) -> bool {
@@ -146,12 +156,12 @@ pub enum OfflineStatus {
 }
 
 impl OfflineStatus {
-    pub fn as_symbol(&self) -> Symbol {
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
         match self {
-            OfflineStatus::PendingReconciliation => Symbol::new(&[b"PENDING"]),
-            OfflineStatus::Reconciled => Symbol::new(&[b"RECON"]),
-            OfflineStatus::FailedReconciliation => Symbol::new(&[b"FAILED"]),
-            OfflineStatus::Disputed => Symbol::new(&[b"DISPUTE"]),
+            OfflineStatus::PendingReconciliation => Symbol::new(env, "PENDING"),
+            OfflineStatus::Reconciled => Symbol::new(env, "RECON"),
+            OfflineStatus::FailedReconciliation => Symbol::new(env, "FAILED"),
+            OfflineStatus::Disputed => Symbol::new(env, "DISPUTE"),
         }
     }
 
@@ -167,9 +177,9 @@ pub struct CBDCTransaction {
     /// Unique transaction ID (generated offline or on-chain)
     pub tx_id: BytesN<32>,
     /// Source CBDC pilot
-    pub source_pilot: u8, // CBDCPilot as u8
+    pub source_pilot: u32, // CBDCPilot as u8
     /// Destination CBDC pilot
-    pub dest_pilot: u8, // CBDCPilot as u8
+    pub dest_pilot: u32, // CBDCPilot as u8
     /// Sending account address
     pub from: Address,
     /// Receiving account address
@@ -183,11 +193,11 @@ pub struct CBDCTransaction {
     /// Timestamp of transaction creation
     pub timestamp: u64,
     /// Interoperability protocol used
-    pub protocol: u8, // InteropProtocol as u8
+    pub protocol: u32, // InteropProtocol as u8
     /// Privacy tier for this transaction
-    pub privacy_tier: u8, // PrivacyTier as u8
+    pub privacy_tier: u32, // PrivacyTier as u8
     /// Optional offline status
-    pub offline_status: Option<u8>, // OfflineStatus as u8
+    pub offline_status: Option<u32>, // OfflineStatus
     /// Transaction metadata
     pub metadata: Bytes,
 }
@@ -199,10 +209,7 @@ impl CBDCTransaction {
         let mut input = soroban_sdk::Bytes::new(prev_hash.env());
 
         // Append serializable fields for hashing
-        input.append(&Bytes::from_slice(
-            &self.tx_id.env(),
-            self.tx_id.as_ref(),
-        ));
+        input.append(&self.tx_id.to_bytes());
         input.append(&Bytes::from_slice(&self.tx_id.env(), &self.source_pilot.to_le_bytes()));
         input.append(&Bytes::from_slice(&self.tx_id.env(), &self.dest_pilot.to_le_bytes()));
         input.append(&Bytes::from_slice(
@@ -220,7 +227,7 @@ impl CBDCTransaction {
         input.append(&Bytes::from_slice(&self.tx_id.env(), &self.timestamp.to_le_bytes()));
         input.append(&self.metadata);
 
-        self.tx_id.env().crypto().sha256(&input)
+        self.tx_id.env().crypto().sha256(&input).to_bytes()
     }
 }
 
@@ -235,7 +242,7 @@ pub struct BatchSettlement {
     /// Total batch amount (source pilot)
     pub total_amount: u128,
     /// Settlement status
-    pub settlement_status: u8, // OfflineStatus as u8
+    pub settlement_status: u32, // OfflineStatus as u8
     /// Timestamp of batch creation
     pub created_at: u64,
     /// Timestamp of settlement

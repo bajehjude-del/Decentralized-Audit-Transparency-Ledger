@@ -1,7 +1,8 @@
 #![no_std]
 
 use crate::suptech_types::{DataFeed, DataFeedType};
-use soroban_sdk::{contracttype, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contracttype, Bytes, BytesN, Env, Vec};
+use soroban_sdk::xdr::ToXdr;
 
 /// Represents a data point in a feed stream.
 #[contracttype]
@@ -10,7 +11,7 @@ pub struct DataPoint {
     /// Timestamp of data point
     pub timestamp: u64,
     /// Feed type
-    pub feed_type: u8, // DataFeedType as u8
+    pub feed_type: u32, // DataFeedType as u32
     /// Data payload
     pub payload: Bytes,
     /// Data hash for integrity
@@ -76,7 +77,7 @@ impl FeedManager {
 
         Ok(DataFeed {
             feed_id,
-            feed_type: feed_type as u8,
+            feed_type: feed_type as u32,
             current_data: initial_data,
             last_updated: now,
             update_frequency: feed_type.update_frequency_seconds(),
@@ -90,10 +91,10 @@ impl FeedManager {
     pub fn compute_feed_id(env: &Env, feed_type: DataFeedType) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, feed_type.as_symbol().to_string().as_bytes()));
+        input.append(&Bytes::from_slice(env, feed_type.as_str().as_bytes()));
         input.append(&Bytes::from_slice(env, &env.ledger().timestamp().to_le_bytes()));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Publish data point to feed
@@ -132,7 +133,7 @@ impl FeedManager {
         input.append(data);
         input.append(&Bytes::from_slice(env, &timestamp.to_le_bytes()));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Verify data freshness
@@ -174,10 +175,10 @@ impl FeedManager {
     ) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, feed_id.as_ref()));
-        input.append(&Bytes::from_slice(env, subscriber.to_xdr().as_ref()));
+        input.append(&feed_id.to_bytes());
+        input.append(&subscriber.to_xdr(env));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Record data point receipt
@@ -273,10 +274,10 @@ impl FeedManager {
     ) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, address.to_xdr().as_ref()));
+        input.append(&address.to_xdr(env));
         input.append(&Bytes::from_slice(env, b"PUBLISHER"));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Deactivate feed
@@ -329,7 +330,7 @@ mod tests {
         let env = soroban_sdk::Env::default();
         let mut feed = DataFeed {
             feed_id: BytesN::zero(),
-            feed_type: DataFeedType::BalanceSnapshot as u8,
+            feed_type: DataFeedType::BalanceSnapshot as u32,
             current_data: Bytes::from_slice(&env, b"data"),
             last_updated: 1000,
             update_frequency: 300,
@@ -347,7 +348,7 @@ mod tests {
         let env = soroban_sdk::Env::default();
         let feed = DataFeed {
             feed_id: BytesN::zero(),
-            feed_type: DataFeedType::TransactionStream as u8,
+            feed_type: DataFeedType::TransactionStream as u32,
             current_data: Bytes::from_slice(&env, b"data"),
             last_updated: 1000,
             update_frequency: 300,

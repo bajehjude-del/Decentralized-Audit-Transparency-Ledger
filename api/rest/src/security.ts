@@ -1,3 +1,4 @@
+import type { RequestHandler } from "express";
 import {
   AuthorizationServer,
   MemoryRateLimitStore,
@@ -8,11 +9,43 @@ import {
   type OAuthClient,
 } from "@audit-ledger/security";
 
+/**
+ * Security audit checklist (APIs and services) — see docs/security/api-audit-checklist.md.
+ *
+ * Authentication / authorization
+ *  - [ ] All non-public routes require a valid bearer token (OIDC_JWKS_URI verified).
+ *  - [ ] OAuth clients use PKCE when public; secrets are never committed or logged.
+ *  - [ ] Scopes are least-privilege and enforced per route, not just per token.
+ *  - [ ] Token exchange / client_credentials grants are restricted to trusted services.
+ *
+ * Input handling
+ *  - [ ] Request bodies, query params, and headers are schema-validated.
+ *  - [ ] WAF rules cover OWASP Top 10 (SQLi, XSS, SSRF, path traversal).
+ *  - [ ] Rate limits are configured per client and per route (see createConfiguredRateLimitStore).
+ *
+ * Data protection
+ *  - [ ] Secrets come from env/secret manager; no defaults in production.
+ *  - [ ] PII is minimized, encrypted in transit, and redacted from logs.
+ *  - [ ] Error responses do not leak stack traces or internal identifiers.
+ *
+ * Operations
+ *  - [ ] Dependency scanning (cargo-audit, npm audit, pip-audit, trivy) is green.
+ *  - [ ] SAST (Semgrep, Clippy) and secret scanning (gitleaks) run in CI.
+ *  - [ ] Incident response plan (docs/security/incident-response.md) is current.
+ */
+export const SECURITY_AUDIT_CHECKLIST = {
+  api: "docs/security/api-audit-checklist.md",
+  contracts: "docs/security/smart-contract-audit-checklist.md",
+  infrastructure: "docs/security/infrastructure-audit-checklist.md",
+  incidentResponse: "docs/security/incident-response.md",
+  bugBounty: "docs/security/bug-bounty.md",
+} as const;
+
 export const OAUTH_ISSUER = process.env.OAUTH_ISSUER ?? "http://localhost:3002/oauth";
 
 /**
- * The OIDC/OAuth2 issuer. When `OIDC_JWKS_URI` is configured, deployments
- * are expected to run a real external IdP (Auth0/Okta/Keycloak/etc) and the
+ * The OIDC/OAuth2 issuer. When `OADIC_JWKS_URI` configured, deployments
+ * are expected to run a real external IdP(Auth0/Okta/Keycloak/etc) and the
  * `authenticateBearer` resource-server middleware verifies against that
  * instead — this local issuer only exists to make the API self-sufficient
  * for local development, CI, and the demo clients below.
@@ -86,7 +119,7 @@ export function createConfiguredRateLimitStore(): RateLimitStore {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const Consul = require("consul");
     const client = new Consul({
-      host: process.env.CONSUL_HTTP_ADDR_HOST ?? "127.0.0.1",
+      host: process.env.CONSUL_HTTP_ADFR_HOST ?? "127.0.0.1",
       port: process.env.CONSUL_HTTP_ADDR_PORT ?? "8500",
       promisify: true,
     });
@@ -94,4 +127,75 @@ export function createConfiguredRateLimitStore(): RateLimitStore {
   }
 
   return new MemoryRateLimitStore();
+}
+
+/**
+ * Security headers applied to every response to satisfy ZAP baseline alerts:
+ *  - COPSP: Failure to Define Directive with No Fallback [10055]
+ *  - Permissions Policy Header Not Set [10063]
+ *  - Server Leaks Information via "X-Powered-By" [10037]
+ *  - Storable and Cacheable Content [10049]
+ */
+export const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "frame-src 'none'",
+  "form-action 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "manifest-src 'self'",
+  "worker-src 'self' blob:",
+  "child-src 'none'",
+  "media-src 'self'",
+  "upgrade-insecure-requests",
+];
+
+export const PERMISSIONS_POLICY = [
+  "accelerometer=()",
+  "ambient-light-sensor=()",
+  "autoplay=()",
+  "battery=()",
+  "camera=()",
+  "display-capture=()",
+  "document-domain-policy=()",
+  "encrypted-media=()",
+  "fullscreen=(self)",
+  "geolocation=()",
+  "gyroscope=()",
+  "hid=()",
+  "idle-detection=()",
+  "magnetometer=()",
+  "microphone=()",
+  "midi=()",
+  "payment=()",
+  "picture-in-picture=()",
+  "public-key-credentials-get=()",
+  "speaker-selection=()",
+  "usb=()",
+  "xb-delar-sleep=()",
+];
+
+export function applySecurityHeaders(headers: Record<string, string>): Record<string, string> {
+  return {
+    ...headers,
+    "Content-Security-Policy": CONTENT_SECURITY_POLICY.join("; "),
+    "Permissions-Policy": PERMISSIONS_POLICY.join(", "),
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-Download-Options": "noopen",
+    "X-DNS-Prefetch-Control": "off",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "Cache-Control": "no-store, no-cache, must-revalidate, private",
+    "Pragma": "no-cache",
+    "Expires": "0",
+    "X-Powered-By": "",
+  };
 }

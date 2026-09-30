@@ -2,6 +2,7 @@
 
 use crate::suptech_types::{ReportingStandard, SupervisoryReport, ReportValidationStatus};
 use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::xdr::ToXdr;
 
 /// Report submission record.
 #[contracttype]
@@ -12,7 +13,7 @@ pub struct ReportSubmission {
     /// Submitter institution
     pub submitter: Address,
     /// Reporting standard
-    pub standard: u8, // ReportingStandard as u8
+    pub standard: u32, // ReportingStandard as u32
     /// Reporting period (epoch seconds start)
     pub period_start: u64,
     /// Reporting period (epoch seconds end)
@@ -22,7 +23,7 @@ pub struct ReportSubmission {
     /// Report data
     pub data: Bytes,
     /// Validation status
-    pub status: u8, // ReportValidationStatus as u8
+    pub status: u32, // ReportValidationStatus as u32
 }
 
 /// Report validation result.
@@ -36,7 +37,7 @@ pub struct ValidationResult {
     /// Validator address
     pub validator: Address,
     /// Validation status
-    pub status: u8, // ReportValidationStatus as u8
+    pub status: u32, // ReportValidationStatus as u32
     /// Issues found
     pub issues: Vec<Bytes>,
     /// Validation score (0-100)
@@ -68,13 +69,13 @@ impl ReportingManager {
 
         Ok(SupervisoryReport {
             report_id,
-            standard: standard as u8,
+            standard: standard as u32,
             reporting_period: period_end,
             report_data,
             submitter,
             submitted_at: env.ledger().timestamp(),
             validated_at: None,
-            validation_status: ReportValidationStatus::Pending as u8,
+            validation_status: ReportValidationStatus::Pending as u32,
             validation_notes: Bytes::new(env),
         })
     }
@@ -88,11 +89,11 @@ impl ReportingManager {
     ) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, submitter.to_xdr().as_ref()));
+        input.append(&submitter.to_xdr(env));
         input.append(&Bytes::from_slice(env, &period_start.to_le_bytes()));
         input.append(&Bytes::from_slice(env, &period_end.to_le_bytes()));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Validate report format against standard
@@ -101,7 +102,7 @@ impl ReportingManager {
         standard: ReportingStandard,
     ) -> Result<(), &'static str> {
         // Check standard matches
-        if report.standard != standard as u8 {
+        if report.standard != standard as u32 {
             return Err("Report standard mismatch");
         }
 
@@ -156,20 +157,20 @@ impl ReportingManager {
     ) -> Result<ValidationResult, &'static str> {
         if !matches!(
             report.validation_status,
-            s if s == ReportValidationStatus::Pending as u8
+            s if s == ReportValidationStatus::Pending as u32
         ) {
             return Err("Report is not in pending state");
         }
 
         let now = env.ledger().timestamp();
         report.validated_at = Some(now);
-        report.validation_status = ReportValidationStatus::Accepted as u8;
+        report.validation_status = ReportValidationStatus::Accepted as u32;
 
         Ok(ValidationResult {
             report_id: report.report_id.clone(),
             validated_at: now,
             validator,
-            status: ReportValidationStatus::Accepted as u8,
+            status: ReportValidationStatus::Accepted as u32,
             issues: Vec::new(env),
             validation_score: 100,
         })
@@ -188,13 +189,13 @@ impl ReportingManager {
 
         let now = env.ledger().timestamp();
         report.validated_at = Some(now);
-        report.validation_status = ReportValidationStatus::RequiresCorrections as u8;
+        report.validation_status = ReportValidationStatus::RequiresCorrections as u32;
 
         Ok(ValidationResult {
             report_id: report.report_id.clone(),
             validated_at: now,
             validator,
-            status: ReportValidationStatus::RequiresCorrections as u8,
+            status: ReportValidationStatus::RequiresCorrections as u32,
             issues,
             validation_score: 50,
         })
@@ -209,7 +210,7 @@ impl ReportingManager {
     ) -> Result<ValidationResult, &'static str> {
         let now = env.ledger().timestamp();
         report.validated_at = Some(now);
-        report.validation_status = ReportValidationStatus::Flagged as u8;
+        report.validation_status = ReportValidationStatus::Flagged as u32;
         report.validation_notes = reason.clone();
 
         let mut issues = Vec::new(env);
@@ -219,7 +220,7 @@ impl ReportingManager {
             report_id: report.report_id.clone(),
             validated_at: now,
             validator,
-            status: ReportValidationStatus::Flagged as u8,
+            status: ReportValidationStatus::Flagged as u32,
             issues,
             validation_score: 30,
         })
@@ -234,7 +235,7 @@ impl ReportingManager {
     ) -> Result<ValidationResult, &'static str> {
         let now = env.ledger().timestamp();
         report.validated_at = Some(now);
-        report.validation_status = ReportValidationStatus::Rejected as u8;
+        report.validation_status = ReportValidationStatus::Rejected as u32;
         report.validation_notes = reason.clone();
 
         let mut issues = Vec::new(env);
@@ -244,7 +245,7 @@ impl ReportingManager {
             report_id: report.report_id.clone(),
             validated_at: now,
             validator,
-            status: ReportValidationStatus::Rejected as u8,
+            status: ReportValidationStatus::Rejected as u32,
             issues,
             validation_score: 0,
         })
@@ -286,14 +287,14 @@ impl ReportingManager {
     }
 
     /// Extract reporting period from report
-    pub fn get_reporting_period(report: &SupervisoryReport) -> Symbol {
+    pub fn get_reporting_period(env: &Env, report: &SupervisoryReport) -> Symbol {
         // Determine from period_end
         let quarter = (report.reporting_period / 7776000) % 4; // Rough quarter estimate
         match quarter {
-            0 => Symbol::new(&[b"Q1"]),
-            1 => Symbol::new(&[b"Q2"]),
-            2 => Symbol::new(&[b"Q3"]),
-            _ => Symbol::new(&[b"Q4"]),
+            0 => Symbol::new(env, "Q1"),
+            1 => Symbol::new(env, "Q2"),
+            2 => Symbol::new(env, "Q3"),
+            _ => Symbol::new(env, "Q4"),
         }
     }
 }
@@ -370,7 +371,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(report.validation_status, ReportValidationStatus::Pending as u8);
+        assert_eq!(report.validation_status, ReportValidationStatus::Pending as u32);
         assert_eq!(report.reporting_period, 2000);
     }
 

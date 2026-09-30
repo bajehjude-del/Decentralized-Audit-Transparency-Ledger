@@ -11,15 +11,20 @@ usage() {
     echo "Usage: $0 {list|validate|execute|dry-run} [runbook-name] [options]"
     echo ""
     echo "Available runbooks:"
-    echo "  - contract-pause   : Emergency contract pause & event ingestion freeze"
-    echo "  - cap-increase     : Storage & throughput cap expansion"
-    echo "  - schema-update    : Event schema evolution and verification"
-    echo "  - bridge-failover  : Cross-chain bridge relayer failover"
+    echo "  - contract-pause          : Emergency contract pause & event ingestion freeze"
+    echo "  - cap-increase            : Storage & throughput cap expansion"
+    echo "  - schema-update           : Event schema evolution and verification"
+    echo "  - bridge-failover         : Cross-chain bridge relayer failover"
+    echo "  - contract-upgrade-failure: Contract WASM upgrade failure rollback"
+    echo "  - rpc-outage              : Stellar / Soroban RPC outage failover"
+    echo "  - database-corruption     : Database snapshot restore & replay catchup"
+    echo "  - monitoring-stack-outage : Prometheus / Grafana / Exporter recovery"
     echo ""
     echo "Examples:"
     echo "  $0 validate contract-pause"
     echo "  $0 dry-run cap-increase '{\"newMaxLogs\": 50000}'"
     echo "  $0 execute bridge-failover '{\"newRelayerAddress\": \"GBACKUP_RELAYER_KEY\"}'"
+    echo "  $0 execute rpc-outage"
     exit 1
 }
 
@@ -40,16 +45,20 @@ case "$ACTION" in
             const { schemaUpdateRunbook } = require('${RUNBOOK_DIR}/tools/runbooks/dist/tasks/schema-update.js');
             const { bridgeFailoverRunbook } = require('${RUNBOOK_DIR}/tools/runbooks/dist/tasks/bridge-failover.js');
             console.log('Registered Runbooks:');
-            console.log(' 1. contract-pause   [' + contractPauseRunbook.id + ']');
-            console.log(' 2. cap-increase     [' + capIncreaseRunbook.id + ']');
-            console.log(' 3. schema-update    [' + schemaUpdateRunbook.id + ']');
-            console.log(' 4. bridge-failover  [' + bridgeFailoverRunbook.id + ']');
+            console.log(' 1. contract-pause            [' + contractPauseRunbook.id + ']');
+            console.log(' 2. cap-increase              [' + capIncreaseRunbook.id + ']');
+            console.log(' 3. schema-update             [' + schemaUpdateRunbook.id + ']');
+            console.log(' 4. bridge-failover           [' + bridgeFailoverRunbook.id + ']');
         " 2>/dev/null || {
             echo "Registered Runbook Definitions:"
-            echo " 1. contract-pause   (RB-001-CONTRACT-PAUSE)"
-            echo " 2. cap-increase     (RB-002-CAP-INCREASE)"
-            echo " 3. schema-update    (RB-003-SCHEMA-UPDATE)"
-            echo " 4. bridge-failover  (RB-004-BRIDGE-FAILOVER)"
+            echo " 1. contract-pause            (RB-001-CONTRACT-PAUSE)"
+            echo " 2. cap-increase              (RB-002-CAP-INCREASE)"
+            echo " 3. schema-update             (RB-003-SCHEMA-UPDATE)"
+            echo " 4. bridge-failover           (RB-004-BRIDGE-FAILOVER)"
+            echo " 5. contract-upgrade-failure  (RB-005-CONTRACT-UPGRADE-FAILURE)"
+            echo " 6. rpc-outage                (RB-006-RPC-OUTAGE)"
+            echo " 7. database-corruption       (RB-007-DATABASE-CORRUPTION)"
+            echo " 8. monitoring-stack-outage   (RB-008-MONITORING-STACK-OUTAGE)"
         }
         ;;
     validate)

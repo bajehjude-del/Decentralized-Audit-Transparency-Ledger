@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use soroban_sdk::{contracterror, contracttype, Address, Bytes, BytesN, Env, Symbol, Vec, Map};
+use soroban_sdk::{contracterror, contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
 
 /// EU ESPR Compliance error types
 #[contracterror]
@@ -165,7 +165,7 @@ pub struct DigitalPassport {
     pub durability: Durability,                 // Durability information
     pub circularity: Circularity,               // Circularity data
     pub carbon_footprint: CarbonFootprint,      // Carbon emissions
-    pub energy_consumption: Option<EnergyConsumption>, // Energy if applicable
+    pub energy_consumption: EnergyConsumption, // Energy record (zeros = not measured)
     pub substances: Vec<SubstanceInfo>,         // Hazardous substances
     pub compliance_records: Vec<ComplianceRecord>, // Compliance history
     pub lifecycle_stage: PassportLifecycleStage,   // Current lifecycle stage
@@ -293,7 +293,7 @@ pub fn create_passport(
     manufacturer.require_auth();
 
     let now = env.ledger().timestamp();
-    let passport_id = env.crypto().sha256(&product_id);
+    let passport_id = env.crypto().sha256(&product_id).to_bytes();
 
     let identity = ProductIdentity {
         product_id: product_id.clone(),
@@ -313,7 +313,12 @@ pub fn create_passport(
         durability,
         circularity,
         carbon_footprint,
-        energy_consumption: None,
+        energy_consumption: EnergyConsumption {
+            annual_energy_kwh: 0,
+            standby_power_watts: 0,
+            estimated_lifetime_energy: 0,
+            energy_label: Symbol::new(&env, "N/A"),
+        },
         substances: Vec::new(&env),
         compliance_records: Vec::new(&env),
         lifecycle_stage: PassportLifecycleStage::Created,
@@ -332,7 +337,7 @@ pub fn create_passport(
     let mut product_passports: Vec<BytesN<32>> = env
         .storage()
         .persistent()
-        .get(&PassportDataKey::ProductPassports(product_id))
+        .get(&PassportDataKey::ProductPassports(product_id.clone()))
         .unwrap_or_else(|| Vec::new(&env));
     product_passports.push_back(passport_id.clone());
     env.storage()
@@ -516,7 +521,7 @@ pub fn record_recycling(
         .unwrap_or(0);
     env.storage()
         .persistent()
-        .set(&PassportDataKey::RecyclingCount(passport_id), &(count + 1));
+        .set(&PassportDataKey::RecyclingCount(passport_id.clone()), &(count + 1));
 
     // Transition to recycled if recovery rate > 80%
     if recovery_rate > 80 {
@@ -733,19 +738,19 @@ pub fn generate_passport_export(
     passport_id: BytesN<32>,
     format: ExportFormat,
 ) -> PassportExport {
-    let passport: DigitalPassport = env
+    let _passport: DigitalPassport = env
         .storage()
         .persistent()
         .get(&PassportDataKey::Passport(passport_id.clone()))
         .unwrap_or_else(|| panic!("Passport not found"));
 
     let mut verification_url = Bytes::from_slice(&env, b"https://verify-passport.eu/");
-    verification_url.append(&passport_id);
+    verification_url.append(&passport_id.to_bytes());
     let export = PassportExport {
         export_date: env.ledger().timestamp(),
         format,
         data: Bytes::from_slice(&env, b"PASSPORT_DATA"), // Simplified for demo
-        digital_signature: Some(env.crypto().sha256(&Bytes::from_slice(&env, b"PASSPORT_DATA"))),
+        digital_signature: Some(env.crypto().sha256(&Bytes::from_slice(&env, b"PASSPORT_DATA")).to_bytes()),
         verification_url,
     };
 
@@ -772,7 +777,7 @@ pub fn import_passport_data(
     importer.require_auth();
 
     // Simplified import - in real system would parse import_data
-    let passport_id = env.crypto().sha256(&import_data);
+    let passport_id = env.crypto().sha256(&import_data).to_bytes();
 
     // Verify import format is valid
     if import_data.is_empty() {
@@ -796,7 +801,7 @@ pub fn export_to_standard_format(
 
     // Simplified export - real system would generate proper XML/JSON
     let mut export_data = Vec::new(&env);
-    export_data.push_back(Bytes::from_slice(&env, passport.identity.product_id.to_vec().as_slice()));
+    export_data.push_back(passport.identity.product_id.clone());
 
     Bytes::from_slice(&env, b"EXPORTED_DATA")
 }
@@ -838,7 +843,7 @@ pub fn get_product_passports(env: &Env, product_id: Bytes) -> Vec<BytesN<32>> {
 /// Get passport for a specific stage
 pub fn get_passports_by_stage(
     env: &Env,
-    stage: PassportLifecycleStage,
+    _stage: PassportLifecycleStage,
 ) -> Vec<BytesN<32>> {
     // Simplified - real implementation would maintain index
     Vec::new(&env)
@@ -932,3 +937,4 @@ pub fn get_total_passports(env: &Env) -> u32 {
         .get(&PassportDataKey::PassportCount)
         .unwrap_or(0)
 }
+

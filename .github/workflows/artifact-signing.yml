@@ -1,3 +1,4 @@
+# yamllint disable-line rule:line-length
 name: Artifact Signing (Sigstore)
 
 # Signs the WASM binary and SBOM using Sigstore cosign with keyless OIDC
@@ -19,6 +20,12 @@ name: Artifact Signing (Sigstore)
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
 #     audit_ledger.wasm
 #
+# Reproducibility:
+#   - SOURCE_DATE_EPOCH is pinned so timestamps embedded by cargo are stable.
+#   - Cargo is invoked with --locked --frozen to prevent lockfile drift.
+#   - The resulting WASM digest is compared against the reproducible-build
+#     workflow output before signing (see "Verify reproducibility" step).
+#
 # Issue #504 — SLSA Level 3 supply chain security
 
 on:
@@ -32,6 +39,10 @@ on:
         description: 'GitHub Actions run ID to download WASM artifact from (blank = build fresh)'
         required: false
         default: ''
+      expected-wasm-digest:
+        description: 'Expected sha256:<hex> of audit_ledger.wasm from the reproducible build (blank = skip check)'
+        required: false
+        default: ''
 
 permissions: {}
 
@@ -43,6 +54,7 @@ jobs:
       contents: read
       id-token: write   # Required for OIDC token used in keyless signing
       packages: write   # Required for OCI registry uploads (optional)
+      attestations: write  # Required for SLSA provenance attestation upload
 
     outputs:
       wasm-digest:   ${{ steps.digests.outputs.wasm-digest }}
@@ -75,6 +87,7 @@ jobs:
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
+            api.github.com:443
 
       # ── Install Rust toolchain ─────────────────────────────────────────────
       - name: Install Rust 1.85.0 (pinned)
@@ -97,6 +110,7 @@ jobs:
       - name: Build WASM (hermetic)
         env:
           SOURCE_DATE_EPOCH: "0"
+          CARGO_TERM_COLOR: never
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: ""
         run: |
@@ -106,6 +120,7 @@ jobs:
             --release \
             --locked \
             --frozen
+          strip --strip-debug target/wasm32v1-none/release/audit_ledger.wasm || true
           cp target/wasm32v1-none/release/audit_ledger.wasm ./audit_ledger.wasm
           echo "WASM size: $(stat --format='%s' audit_ledger.wasm) bytes"
 
@@ -134,6 +149,27 @@ jobs:
           echo "${WASM_SHA}  audit_ledger.wasm" > checksums.txt
           echo "${SBOM_SHA}  audit-ledger-sbom.json" >> checksums.txt
           cat checksums.txt
+
+      # ── Verify reproducibility ────────────────────────────────────────────
+      - name: Verify reproducibility against expected digest
+        if: ${{ inputs.expected-wasm-digest != '' }}
+        env:
+          EXPECTED: ${{ inputs.expected-wasm-digest }}
+        run: |
+          ACTUAL="sha256:$(sha256sum audit_ledger.wasm | cut -d' ' -f1)"
+          if [ "${ACTUAL}" != "${EXPECTED}" ]; then
+            echo "::error::Reproducibility check failed: expected ${EXPECTED}, got ${ACTUAL}"
+            exit 1
+          fi
+          echo "✓ Reproducibility check passed: ${ACTUAL}"
+
+      # ── Generate SLSA provenance ──────────────────────────────────────────
+      - name: Generate SLSA provenance (in-toto)
+        # slsa-framework/slsa-github-generator v2.0.0
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a # v2.0.0
+        with:
+          base64-subjects: ${{ steps.digests.outputs.wasm-digest }}
+          upload-assets: false
 
       # ── Install cosign ────────────────────────────────────────────────────
       - name: Install cosign
@@ -185,6 +221,16 @@ jobs:
             checksums.txt
           echo "✓ checksums.txt signed"
 
+      # ── Attest provenance ─────────────────────────────────────────────────
+      - name: Attest SLSA provenance
+        # actions/attest-build-provenance v2.2.3
+        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v2.2.3
+        with:
+          subject-path: |
+            audit_ledger.wasm
+            sbom/audit-ledger-sbom.json
+            checksums.txt
+
       # ── Verify signatures (self-check) ────────────────────────────────────
       - name: Self-verify WASM signature
         run: |
@@ -217,6 +263,7 @@ jobs:
             sbom/audit-ledger-sbom.json.bundle
             checksums.txt
             checksums.txt.bundle
+            audit_ledger.wasm.intoto.jsonl
           retention-days: 30
           if-no-files-found: error
 
@@ -225,6 +272,7 @@ jobs:
         run: |
           WASM_SHA=$(sha256sum audit_ledger.wasm | cut -d' ' -f1)
           REKOR_ID="${{ steps.sign-wasm.outputs.rekor-log-id }}"
+          PROV_DIGEST="${{ steps.digests.outputs.wasm-digest }}"
 
           echo "## 🔏 Artifact Signing Complete (Sigstore)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -234,6 +282,7 @@ jobs:
           echo "| Artifact | SHA-256 | Rekor log entry |" >> "$GITHUB_STEP_SUMMARY"
           echo "|----------|---------|-----------------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| \`audit_ledger.wasm\` | \`${WASM_SHA}\` | ${REKOR_ID} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| SLSA provenance | \`${PROV_DIGEST}\` | in-toto attestation |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Verify the signature" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
@@ -243,6 +292,12 @@ jobs:
           echo "  --certificate-identity-regexp 'https://github.com/${{ github.repository }}/' \\" >> "$GITHUB_STEP_SUMMARY"
           echo "  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \\" >> "$GITHUB_STEP_SUMMARY"
           echo "  audit_ledger.wasm" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Verify SLSA provenance" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
+          echo "gh attestation verify audit_ledger.wasm \\" >> "$GITHUB_STEP_SUMMARY"
+          echo "  --repo ${{ github.repository }}" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "See [scripts/verify-artifact.sh](../../scripts/verify-artifact.sh) for the full auditor verification script." >> "$GITHUB_STEP_SUMMARY"

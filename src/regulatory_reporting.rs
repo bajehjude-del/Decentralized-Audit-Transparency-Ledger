@@ -7,7 +7,7 @@
 //! - Acknowledgment and reference tracking
 //! - Immutable audit trail entry types
 
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, Vec};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Regulatory Authority
@@ -265,7 +265,7 @@ pub struct RegulatoryReport {
     /// Timestamp of the most recent status change (Unix seconds).
     pub updated_at: u64,
     /// Last validation result attached to this report.
-    pub last_validation: Option<ValidationResult>,
+    pub last_validation: ValidationResult,
     /// SHA-256 of the previous report for this authority+entity combination
     /// (zero-hash for the first ever report).
     pub prev_report_hash: BytesN<32>,
@@ -543,3 +543,4 @@ mod tests {
         assert!(ReportAction::Submitted < ReportAction::AcknowledgmentReceived);
     }
 }
+

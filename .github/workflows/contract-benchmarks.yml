@@ -1,254 +1,193 @@
-# Contract benchmark suite with regression detection (#406)
-#
-# Two schedules, deliberately:
-#
-#  * on pull requests, to gate the change in front of a reviewer;
-#  * weekly, to catch drift nobody changed — a dependency bump, an SDK cost-model
-#    change, a base-image update — that arrives without a diff to review.
-#
-# The gate compares against `tools/contract-bench/data/baseline.json`, a file that
-# is only changed by `audit-ledger-bench promote`. Nothing in this workflow
-# updates it automatically. A suite that re-baselined itself after every run could
-# not catch a slow regression: each run would bless the previous one and the
-# numbers would ratchet upward one sub-threshold step at a time. Accepting a new
-# cost is a decision somebody makes on purpose.
+name: Contract benchmarks
 
-name: contract-benchmarks
+# Contract performance benchmarking with automated regression detection (#406).
+#
+# The suite measures every entry point's Soroban resource usage (instructions,
+# fee, ledger read/write entries), the contract WASM artifact size, and the
+# host's memory footprint. The resource numbers come from the Soroban host's
+# invocation metering, so they are deterministic: two runs of the same commit
+# produce identical values, which is what makes a tight 5% gate meaningful
+# instead of noise-prone. Wall-clock timings are recorded but deliberately not
+# gated, because they depend on the runner rather than on the contract.
+#
+# Two triggers:
+#   * every PR touching the contract, the suite or the tooling — the gate runs
+#   * weekly on a schedule — the full run plus a committed history snapshot,
+#     which is what the Grafana trend view is built from
+#
+# Baselines are promoted deliberately (`--update-baseline` on the weekly job, or
+# locally), never automatically: a baseline that moves whenever a run regresses
+# cannot detect a regression.
+
+permissions: {}
 
 on:
   pull_request:
     paths:
-      - "src/**"
-      - "abi/**"
-      - "tools/contract-bench/**"
-      - ".github/workflows/contract-benchmarks.yml"
+      - 'src/**'
+      - 'bench/**'
+      - 'scripts/bench/**'
+      - 'benchmarks/baseline.json'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/contract-benchmarks.yml'
   schedule:
-    # Weekly drift detection. 04:17 rather than 04:00 to avoid the scheduling
-    # spike that every cron job on the platform lands on together.
-    - cron: "17 4 * * 1"
+    # Weekly, Mondays at 04:17 UTC. Off the hour to avoid the top-of-hour rush
+    # that delays every scheduled workflow on GitHub.
+    - cron: '17 4 * * 1'
   workflow_dispatch:
     inputs:
-      threshold:
-        description: "Regression threshold, percent"
-        default: "5"
-        type: string
-      promote:
-        description: "Accept the new run as the baseline"
-        default: false
+      update_baseline:
+        description: Promote this run to the committed baseline
         type: boolean
+        default: false
+      threshold:
+        description: Regression threshold in percent
+        type: string
+        default: '5'
 
 concurrency:
   group: contract-benchmarks-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  # `contents: write` is needed by the manual promote step, which commits the
-  # accepted baseline back to the repository. Everything else the workflow does
-  # is read-only.
-  contents: write
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  # Keep the report paths anchored at the repository root regardless of the
+  # package directory cargo chooses as the benchmark working directory.
+  BENCH_REPO_ROOT: ${{ github.workspace }}
 
 jobs:
-  benchmark:
-    name: Measure and check for regressions
+  regression:
+    name: Regression gate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    outputs:
-      regressions: ${{ steps.check.outputs.regressions }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
         with:
-          # The history chart and the baseline comparison need the previous run.
+          persist-credentials: false
+          # Full history so the harness can stamp the report with the real
+          # commit, and so a scheduled run can push a history snapshot.
           fetch-depth: 0
 
-      - name: Record the revision under test
-        id: rev
-        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Cache cargo build
+        uses: actions/cache@v4
         with:
-          toolchain: stable
-          components: clippy, rustfmt
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: bench-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            bench-${{ runner.os }}-
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: tools/contract-bench -> target
+      - name: Add WASM target
+        run: rustup target add wasm32v1-none
 
-      - name: Build and test the benchmark suite
-        working-directory: tools/contract-bench
+      - name: Run benchmarks and detect regressions
+        id: detect
         run: |
-          cargo fmt --check
-          cargo clippy --all-targets -- -D warnings
-          cargo test
-
-      # `run` is the command that compares against the baseline, and it is the
-      # one that emits GitHub annotations, so its output is kept for the report
-      # step as well.
-      #
-      # The step is allowed to fail here without failing the job. A regression is
-      # the one result this workflow most needs to *report* on — the report, the
-      # job summary and the measurement artifacts are all still worth producing.
-      # The job fails at the end, once the evidence has been collected.
-      - name: Measure every scenario, function and storage primitive
-        id: measure
-        working-directory: tools/contract-bench
-        continue-on-error: true
-        env:
-          BENCH_REVISION: ${{ steps.rev.outputs.sha }}
-          THRESHOLD: ${{ inputs.threshold || '5' }}
-        run: |
-          set +e
-          cargo run --release --bin audit-ledger-bench -- run --threshold "$THRESHOLD" \
-            > "$RUNNER_TEMP/run.txt" 2>&1
-          status=$?
-          set -e
-          cat "$RUNNER_TEMP/run.txt"
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-
-      - name: Collect the per-group cargo bench output
-        if: always()
-        working-directory: tools/contract-bench
-        run: |
-          cargo bench --bench scenarios
-          cargo bench --bench functions
-          cargo bench --bench storage
-
-      - name: Report the regression verdict
-        id: check
-        if: always()
-        working-directory: tools/contract-bench
-        env:
-          REVISION: ${{ steps.rev.outputs.sha }}
-        run: |
-          # The annotations are counted from the `run` output, not from
-          # `report`: only `run` holds the comparison against the baseline. They
-          # were already emitted as workflow commands by `run` itself, so they
-          # are on the diff; this step turns them into a number the job can fail
-          # on.
-          if [ ! -f "$RUNNER_TEMP/run.txt" ]; then
-            echo "::error title=Benchmark run failed::the suite produced no output to check"
-            echo "regressions=1" >> "$GITHUB_OUTPUT"
-            exit 0
+          # `--github-annotations` is added automatically by the runner when it
+          # detects GITHUB_ACTIONS, so it is deliberately not passed here.
+          args=(--threshold "${{ inputs.threshold || '5' }}")
+          if [ "${{ inputs.update_baseline }}" = "true" ]; then
+            args+=(--update-baseline)
           fi
-          # `grep -c` prints 0 and exits 1 when there are no matches, so the
-          # count is defaulted rather than left to the substitution: an empty
-          # output here would be read downstream as "no data" and could pass.
-          regressions="$(grep -c '^::error' "$RUNNER_TEMP/run.txt" || true)"
-          echo "regressions=${regressions:-0}" >> "$GITHUB_OUTPUT"
-          echo "REVISION=$REVISION" >> "$GITHUB_OUTPUT"
+          scripts/bench/run_benchmarks.sh "${args[@]}"
 
-          cargo run --release --bin audit-ledger-bench -- report > "$RUNNER_TEMP/report.md"
+      - name: Publish the regression summary
+        if: always()
+        run: |
           {
-            echo "### Contract benchmarks"
+            echo "## Contract benchmark regression gate"
             echo
-            echo "Revision \`$REVISION\`, threshold ${{ inputs.threshold || '5' }}%, regression count \`$regressions\`."
-            echo
-            cat "$RUNNER_TEMP/report.md"
+            if [ -f benchmarks/results/regression.md ]; then
+              cat benchmarks/results/regression.md
+            else
+              echo "_The regression step did not produce a summary._"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check the WASM size budget
-        id: wasm
-        if: always()
-        working-directory: tools/contract-bench
-        run: |
-          # Size needs a built artifact. Without one the budget reports itself as
-          # unenforced rather than passing, which is why this step is allowed to
-          # fail without failing the job: the contract build is a separate concern
-          # and currently does not succeed.
-          if cargo run --release --bin audit-ledger-bench -- wasm; then
-            echo "enforced=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enforced=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=WASM size budget::No compiled contract available, so the size budget was not enforced."
-          fi
-
-      - name: Upload the measurement artifacts
+      - name: Upload the benchmark report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: contract-benchmark-results
-          path: |
-            tools/contract-bench/target/bench-results/*.json
-            tools/contract-bench/data/history/*.json
-          retention-days: 90
+          name: benchmark-report-${{ github.run_id }}
+          path: benchmarks/results/
           if-no-files-found: warn
+          retention-days: 30
 
-      - name: Chart the metric across retained runs
+      - name: Record the verdict
         if: always()
-        working-directory: tools/contract-bench
-        run: cargo run --release --bin audit-ledger-bench -- history --metric instructions --output history.svg || true
-
-      - name: Upload the history chart
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: contract-benchmark-history
-          path: tools/contract-bench/history.svg
-          retention-days: 90
-          if-no-files-found: warn
-
-      - name: Export metrics for Grafana
-        if: always()
-        working-directory: tools/contract-bench
-        env:
-          # Bound from secrets here. Without this the shell test below sees two
-          # empty strings and the push silently never happens.
-          GRAFANA_PUSH_URL: ${{ secrets.GRAFANA_PUSH_URL }}
-          GRAFANA_PUSH_TOKEN: ${{ secrets.GRAFANA_PUSH_TOKEN }}
         run: |
-          cargo run --release --bin audit-ledger-bench -- export --output metrics.prom
-          cat metrics.prom >> "$GITHUB_STEP_SUMMARY"
-          # Push to a Pushgateway when the workflow is configured with one.
-          # Absent configuration this is skipped rather than failing, so the
-          # suite does not become a hard dependency on the monitoring stack.
-          if [ -n "${GRAFANA_PUSH_URL:-}" ] && [ -n "${GRAFANA_PUSH_TOKEN:-}" ]; then
-            curl -fsS -X POST \
-              --user "ci:${GRAFANA_PUSH_TOKEN}" \
-              --data-binary @metrics.prom \
-              "${GRAFANA_PUSH_URL}/metrics/job/contract-benchmarks"
-            echo "pushed metrics to Grafana"
-          else
-            echo "GRAFANA_PUSH_URL not configured; metrics exported to metrics.prom only"
+          if [ -f benchmarks/results/regression-summary.json ]; then
+            cat benchmarks/results/regression-summary.json >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # Accepting a new baseline is deliberately a manual act. The scheduled run
-      # records history and reports drift; a person decides whether the new
-      # numbers are an intended cost.
-      - name: Promote the new baseline
-        if: github.event_name == 'workflow_dispatch' && inputs.promote == true
-        working-directory: tools/contract-bench
+  history:
+    name: Historical snapshot
+    # Only the weekly/manual run archives a snapshot: a per-PR snapshot would
+    # bury the trend in one-off commits and the archive is meant to answer
+    # "which release got slower", which only a dated, deliberate series can.
+    #
+    # `always()` is deliberate: the snapshot is most valuable exactly when the
+    # gate fails, because that is the run you will want to compare against
+    # later. A detected regression must not cost us the evidence.
+    if: >-
+      always() &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download the benchmark report
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-report-${{ github.run_id }}
+          path: benchmarks/results
+
+      - name: Commit the dated snapshot
         run: |
-          cargo run --release --bin audit-ledger-bench -- promote
-          # `promote` only rewrites the file in the runner's checkout. Without
-          # committing it the new baseline is discarded when the job ends and the
-          # gate keeps comparing against the old one forever, so the promotion
-          # would silently do nothing.
-          cd "$GITHUB_WORKSPACE"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # The retained runs travel with the baseline: a chart that cannot be
-          # rebuilt from the repository has to be re-derived from artifacts that
-          # expire after 90 days.
-          git add tools/contract-bench/data/baseline.json tools/contract-bench/data/history
-          if git diff --cached --quiet; then
-            echo "baseline unchanged; nothing to promote"
+          set -euo pipefail
+          REPORT="benchmarks/results/benchmark-report.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "::error::no benchmark report was produced; skipping the snapshot"
             exit 0
           fi
-          git commit -m "chore(bench): accept new benchmark baseline
-
-          Promoted from a manual workflow run of the contract benchmark suite."
-          # A push to a protected branch needs an allowance; the step is allowed
-          # to fail rather than failing the run, because the measurement and its
-          # artifacts are already recorded either way.
-          git push || echo "::warning title=Baseline not promoted::could not push the new baseline; the repository may require a pull request for this branch"
-
-      - name: Fail if a metric regressed
-        if: always()
-        env:
-          REGRESSIONS: ${{ steps.check.outputs.regressions || '0' }}
-          STATUS: ${{ steps.measure.outputs.status || '0' }}
-        run: |
-          if [ "${REGRESSIONS:-0}" -gt 0 ] || [ "${STATUS:-0}" -ne 0 ]; then
-            echo "::error title=Benchmark regression::${REGRESSIONS} metric(s) regressed; see the job summary for the full report"
-            exit 1
+          STAMP="$(date -u +%Y-%m-%d)"
+          SNAPSHOT="benchmarks/history/$STAMP.json"
+          mkdir -p benchmarks/history
+          cp "$REPORT" "$SNAPSHOT"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$SNAPSHOT"
+          if git diff --cached --quiet; then
+            echo "the benchmark snapshot is unchanged since the last run today"
+            exit 0
           fi
-          echo "no regression beyond the threshold"
+          git commit -m "chore(bench): record contract benchmark snapshot for $STAMP"
+          git push
+
+      - name: Upload the history series
+        if: always()
+        run: |
+          scripts/bench/prometheus_exposition.py \
+            --history benchmarks/history \
+            --out benchmarks/history.prom
+          cat benchmarks/history.prom >> "$GITHUB_STEP_SUMMARY"

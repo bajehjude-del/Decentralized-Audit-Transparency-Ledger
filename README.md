@@ -74,7 +74,12 @@ fn total_events(env: Env) -> u32;
 fn get_event(env: Env, id: BytesN<32>) -> Event;
 fn event_count(env: Env, event_type: Symbol) -> u32;
 fn get_event_by_type(env: Env, event_type: Symbol, type_index: u32) -> Event;
+fn get_total_events_at_ledger(env: Env, ledger: u32) -> u32;
+fn get_event_at_ledger(env: Env, event_id: BytesN<32>, ledger: u32) -> Event;
+fn get_event_by_type_at_ledger(env: Env, event_type: Symbol, type_index: u32, ledger: u32) -> Event;
 ```
+
+Historical queries return the latest contract-maintained event snapshot at or before the requested ledger. Event additions and updates are indexed by ledger, event ID, and event type; ledgers before the first recorded snapshot return a total of zero and have no events.
 
 ### Governance (Owner Only)
 

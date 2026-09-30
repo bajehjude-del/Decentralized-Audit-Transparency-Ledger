@@ -39,13 +39,13 @@ pub fn compute_entry_hash(
     prev_entry_hash: &BytesN<32>,
 ) -> BytesN<32> {
     let mut buf = Bytes::new(env);
-    buf.append(&Bytes::from_slice(env, report_id.as_ref()));
+    buf.append(&report_id.to_bytes());
     buf.extend_from_array(&(action as u32).to_le_bytes());
     buf.extend_from_array(&sequence.to_le_bytes());
     buf.extend_from_array(&timestamp.to_le_bytes());
     buf.append(context);
-    buf.append(&Bytes::from_slice(env, prev_entry_hash.as_ref()));
-    env.crypto().sha256(&buf)
+    buf.append(&prev_entry_hash.to_bytes());
+    env.crypto().sha256(&buf).to_bytes()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -221,7 +221,7 @@ pub fn record_submitted(
 ) -> ReportingAuditEntry {
     let mut ctx = Bytes::new(env);
     ctx.extend_from_slice(b"submission_id=");
-    ctx.append(&Bytes::from_slice(env, submission_id.as_ref()));
+    ctx.append(&submission_id.to_bytes());
     ctx.extend_from_slice(b"\nattempt=");
     ctx.extend_from_array(&attempt.to_le_bytes());
     ctx.extend_from_slice(b"\n");
@@ -250,7 +250,7 @@ pub fn record_acknowledgment_received(
 ) -> ReportingAuditEntry {
     let mut ctx = Bytes::new(env);
     ctx.extend_from_slice(b"ack_id=");
-    ctx.append(&Bytes::from_slice(env, ack_id.as_ref()));
+    ctx.append(&ack_id.to_bytes());
     ctx.extend_from_slice(b"\naccepted=");
     ctx.extend_from_slice(if accepted { b"1\n" } else { b"0\n" });
 

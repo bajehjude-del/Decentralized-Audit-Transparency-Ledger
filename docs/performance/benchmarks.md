@@ -1,27 +1,72 @@
 # Benchmark Results
 
-> **These figures are illustrative estimates, not measurements.**
->
-> The numbers below were written by hand as expected magnitudes (`~5,000` gas per
-> event, `~0.5s` per 1,000 events) before a benchmark suite existed to produce
-> them. Nothing in this file was read back from a host meter, and the
-> "Methodology" section it originally carried described a measurement process that
-> was not performed. Treat every table here as a rough sense of scale and nothing
-> more.
->
-> For numbers that are actually measured, see
-> [Contract benchmark methodology](benchmark-methodology.md) and the
-> `tools/contract-bench` suite. Where the two disagree, the suite is right and
-> this file is a guess.
+> This page collects benchmark results. The contract benchmarking suite that
+> produces the measured numbers below is documented in
+> [Benchmark Methodology](benchmark-methodology.md); to rerun it,
+> `scripts/bench/run_benchmarks.sh`.
 
 ## Methodology
 
-- Tests run in the Soroban test environment (not on a live network)
-- Gas estimates are from Stellar's simulation infrastructure
-- Latency measurements are from local development deployments
-- Production performance may vary based on network conditions
+- Tests run in the Soroban test environment (not on a live network), driven
+  through a custom harness that reads the host's own invocation metering
+  (`bench/benches/`), so the resource numbers are deterministic.
+- Gas/fee estimates are from Stellar's simulation infrastructure (the network
+  fee schedule compiled into the SDK under test).
+- The sections below are a snapshot taken from the suite's baseline report
+  (`benchmarks/baseline.json`). Run-to-run numbers are on
+  `benchmarks/history/`.
+- The latency figures in the legacy tables are from local development
+  deployments; they precede the deterministic harness and are kept for
+  historical context only.
 
-## Contract Benchmarks
+## Contract Benchmarks (measured)
+
+Updated from `scripts/bench/run_benchmarks.sh` (`199 cases`, baseline generated
+per commit; numbers below are current at this writing).
+
+### Single-event vs batch cost (amortisation)
+
+The batch entry point amortises its fixed per-call cost: twenty events logged in
+one call cost less than **a third** of the fee of one event logged alone, while
+the whole batch still performs only two ledger writes.
+
+| Events per call | Fee per event (stroops) | Instructions per event | Ledger writes (per call) | Read entries (per call) |
+|-----------------|-------------------------|------------------------|--------------------------|-------------------------|
+| 1 (log_event)   | 2,260,724               | 485,469                | 2 | 3 |
+| 5  (log_events) | 486,295                 | 377,912                | 2 | 3 |
+| 10 (log_events) | 264,535                 | 425,459                | 2 | 3 |
+| 20 (log_events) | 153,723                 | 547,120                | 2 | 3 |
+
+*Fee per event falls 93% from 1 to 20 events; ledger writes stay flat.*
+
+### Metadata size impact (single event)
+
+| Metadata | Fee (stroops) | Instructions | Write entries | Write bytes |
+|----------|---------------|--------------|---------------|-------------|
+| 0 B      | 2,267,152     | 596,322      | 4 | 2,408 |
+| 64 B     | 2,272,324     | 606,952      | 4 | 2,536 |
+| 256 B    | 2,287,842     | 638,842      | 4 | 2,920 |
+| 1 KB     | 2,349,910     | 766,402      | 4 | 4,456 |
+
+*Metadata is the primary cost lever: +4% fee and +29% instructions from 0 B to
+1 KB.*
+
+### Limits
+
+The contract's advertised size bound (4 KiB, exercised by the limits suite):
+
+| Case | Outcome | Fee (stroops) |
+|------|---------|---------------|
+| Largest accepted metadata (4096 B) | accepted | 2,598,184 |
+| 4097 B metadata | rejected (`MetadataTooLarge`) | n/a |
+| Last event within cap | accepted | 2,273,909 |
+| Event past the global cap | rejected (`GlobalMaxLogsReached`) | n/a |
+
+## Legacy estimates (pre-harness)
+
+Kept for continuity; superseded by the measured rows above and the
+methodology document. **Gas** here is the old coarse unit and is not directly
+comparable with the current stroops figures.
 
 ### Sequential Logging
 
@@ -86,6 +131,8 @@
 
 - Contract operations are **O(1)** for individual reads and writes
 - Event logging scales **linearly** with event count
+- Event **logging in one call** (batch) is dramatically cheaper per event than
+  one at a time, with no extra ledger traffic
 - Metadata size is the primary cost lever for contract operations
 - REST and GraphQL APIs show acceptable latency up to 50 concurrent connections
 - Bridge latency is dominated by EVM block times

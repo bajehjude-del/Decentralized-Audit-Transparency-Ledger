@@ -127,7 +127,7 @@ mod tests {
         assert!(!token_id.to_vec().is_empty());
 
         let credit = get_credit_details(&env, credit_id);
-        assert!(credit.tokenization.is_some());
+        assert_ne!(credit.tokenization.token_id, BytesN::from_array(&env, [0u8; 32]));
     }
 
     /// Test 5: Retire credit

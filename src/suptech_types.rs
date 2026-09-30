@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Symbol, Vec};
+use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, contracttype};
 
 /// Represents regulatory supervisory framework jurisdictions.
 #[contracttype]
@@ -26,17 +26,22 @@ pub enum RegulatoryFramework {
 }
 
 impl RegulatoryFramework {
-    pub fn as_symbol(&self) -> Symbol {
+    /// Short on-chain code for this regulator.
+    pub fn code(&self) -> &'static str {
         match self {
-            RegulatoryFramework::BIS => Symbol::new(&[b"BIS"]),
-            RegulatoryFramework::FSB => Symbol::new(&[b"FSB"]),
-            RegulatoryFramework::ECB => Symbol::new(&[b"ECB"]),
-            RegulatoryFramework::FED => Symbol::new(&[b"FED"]),
-            RegulatoryFramework::PBOC => Symbol::new(&[b"PBOC"]),
-            RegulatoryFramework::BoE => Symbol::new(&[b"BOE"]),
-            RegulatoryFramework::BoJ => Symbol::new(&[b"BOJ"]),
-            RegulatoryFramework::NationalRegulator => Symbol::new(&[b"NATL"]),
+            RegulatoryFramework::BIS => "BIS",
+            RegulatoryFramework::FSB => "FSB",
+            RegulatoryFramework::ECB => "ECB",
+            RegulatoryFramework::FED => "FED",
+            RegulatoryFramework::PBOC => "PBOC",
+            RegulatoryFramework::BoE => "BOE",
+            RegulatoryFramework::BoJ => "BOJ",
+            RegulatoryFramework::NationalRegulator => "NATL",
         }
+    }
+
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
+        Symbol::new(env, self.code())
     }
 
     pub fn name(&self) -> &'static str {
@@ -77,17 +82,22 @@ pub enum DataFeedType {
 }
 
 impl DataFeedType {
-    pub fn as_symbol(&self) -> Symbol {
+    /// Short on-chain code for this feed type.
+    pub fn as_str(&self) -> &'static str {
         match self {
-            DataFeedType::TransactionStream => Symbol::new(&[b"TXSTREAM"]),
-            DataFeedType::BalanceSnapshot => Symbol::new(&[b"BALANCE"]),
-            DataFeedType::LiquidityMetrics => Symbol::new(&[b"LIQUID"]),
-            DataFeedType::RiskMetrics => Symbol::new(&[b"RISK"]),
-            DataFeedType::MarketData => Symbol::new(&[b"MARKET"]),
-            DataFeedType::ComplianceAlerts => Symbol::new(&[b"COMPLY"]),
-            DataFeedType::CounterpartyExposure => Symbol::new(&[b"CPTY"]),
-            DataFeedType::StressTestResults => Symbol::new(&[b"STRESS"]),
+            DataFeedType::TransactionStream => "TXSTREAM",
+            DataFeedType::BalanceSnapshot => "BALANCE",
+            DataFeedType::LiquidityMetrics => "LIQUID",
+            DataFeedType::RiskMetrics => "RISK",
+            DataFeedType::MarketData => "MARKET",
+            DataFeedType::ComplianceAlerts => "COMPLY",
+            DataFeedType::CounterpartyExposure => "CPTY",
+            DataFeedType::StressTestResults => "STRESS",
         }
+    }
+
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
+        Symbol::new(env, self.as_str())
     }
 
     pub fn update_frequency_seconds(&self) -> u64 {
@@ -126,15 +136,28 @@ pub enum ReportingStandard {
 }
 
 impl ReportingStandard {
-    pub fn as_symbol(&self) -> Symbol {
+    /// Short on-chain code for this reporting standard.
+    pub fn as_str(&self) -> &'static str {
         match self {
-            ReportingStandard::BCBS239 => Symbol::new(&[b"BCBS239"]),
-            ReportingStandard::SCOMP => Symbol::new(&[b"SCOMP"]),
-            ReportingStandard::COREP => Symbol::new(&[b"COREP"]),
-            ReportingStandard::FINREP => Symbol::new(&[b"FINREP"]),
-            ReportingStandard::SREP => Symbol::new(&[b"SREP"]),
-            ReportingStandard::CVAR => Symbol::new(&[b"CVAR"]),
-            ReportingStandard::AMLCFT => Symbol::new(&[b"AMLCFT"]),
+            ReportingStandard::BCBS239 => "BCBS239",
+            ReportingStandard::SCOMP => "SCOMP",
+            ReportingStandard::COREP => "COREP",
+            ReportingStandard::FINREP => "FINREP",
+            ReportingStandard::SREP => "SREP",
+            ReportingStandard::CVAR => "CVAR",
+            ReportingStandard::AMLCFT => "AMLCFT",
+        }
+    }
+
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
+        match self {
+            ReportingStandard::BCBS239 => Symbol::new(env, "BCBS239"),
+            ReportingStandard::SCOMP => Symbol::new(env, "SCOMP"),
+            ReportingStandard::COREP => Symbol::new(env, "COREP"),
+            ReportingStandard::FINREP => Symbol::new(env, "FINREP"),
+            ReportingStandard::SREP => Symbol::new(env, "SREP"),
+            ReportingStandard::CVAR => Symbol::new(env, "CVAR"),
+            ReportingStandard::AMLCFT => Symbol::new(env, "AMLCFT"),
         }
     }
 
@@ -205,11 +228,11 @@ pub struct Supervisor {
     /// Associated address
     pub address: Address,
     /// Regulatory framework
-    pub framework: u8, // RegulatoryFramework as u8
+    pub framework: u32, // RegulatoryFramework as u8
     /// Role/permission level
-    pub role: u8, // SupervisorRole as u8
+    pub role: u32, // SupervisorRole as u8
     /// Data feeds subscribed to
-    pub subscribed_feeds: soroban_sdk::Vec<u8>, // DataFeedType as u8
+    pub subscribed_feeds: soroban_sdk::Vec<u32>, // DataFeedType
     /// Timestamp created
     pub created_at: u64,
     /// Is active
@@ -225,7 +248,7 @@ pub struct DataFeed {
     /// Feed identifier
     pub feed_id: BytesN<32>,
     /// Type of feed
-    pub feed_type: u8, // DataFeedType as u8
+    pub feed_type: u32, // DataFeedType as u8
     /// Current data payload
     pub current_data: Bytes,
     /// Last update timestamp
@@ -247,7 +270,7 @@ pub struct SupervisoryReport {
     /// Report unique ID
     pub report_id: BytesN<32>,
     /// Reporting standard used
-    pub standard: u8, // ReportingStandard as u8
+    pub standard: u32, // ReportingStandard as u8
     /// Reporting period (e.g., quarter, month)
     pub reporting_period: u64,
     /// Report data in standard format
@@ -259,7 +282,7 @@ pub struct SupervisoryReport {
     /// Timestamp validated by supervisor
     pub validated_at: Option<u64>,
     /// Validation status
-    pub validation_status: u8, // ReportValidationStatus as u8
+    pub validation_status: u32, // ReportValidationStatus as u8
     /// Optional validation notes
     pub validation_notes: Bytes,
 }
@@ -282,13 +305,13 @@ pub enum ReportValidationStatus {
 }
 
 impl ReportValidationStatus {
-    pub fn as_symbol(&self) -> Symbol {
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
         match self {
-            ReportValidationStatus::Pending => Symbol::new(&[b"PENDING"]),
-            ReportValidationStatus::Accepted => Symbol::new(&[b"ACCEPTED"]),
-            ReportValidationStatus::RequiresCorrections => Symbol::new(&[b"CORRECT"]),
-            ReportValidationStatus::Flagged => Symbol::new(&[b"FLAGGED"]),
-            ReportValidationStatus::Rejected => Symbol::new(&[b"REJECTED"]),
+            ReportValidationStatus::Pending => Symbol::new(env, "PENDING"),
+            ReportValidationStatus::Accepted => Symbol::new(env, "ACCEPTED"),
+            ReportValidationStatus::RequiresCorrections => Symbol::new(env, "CORRECT"),
+            ReportValidationStatus::Flagged => Symbol::new(env, "FLAGGED"),
+            ReportValidationStatus::Rejected => Symbol::new(env, "REJECTED"),
         }
     }
 
@@ -309,13 +332,13 @@ pub struct SupervisionRule {
     /// Rule name/description
     pub name: Bytes,
     /// Associated regulatory framework
-    pub framework: u8, // RegulatoryFramework as u8
+    pub framework: u32, // RegulatoryFramework as u8
     /// Rule condition in bytes (e.g., threshold, formula)
     pub condition: Bytes,
     /// Action to trigger when condition met
     pub action: Bytes,
     /// Severity level (0-10)
-    pub severity: u8,
+    pub severity: u32,
     /// Is rule active
     pub is_active: bool,
     /// Timestamp created
@@ -335,7 +358,7 @@ pub struct ComplianceAlert {
     /// Institution affected
     pub institution: Address,
     /// Alert severity (0-10)
-    pub severity: u8,
+    pub severity: u32,
     /// Alert message/description
     pub message: Bytes,
     /// Timestamp alert triggered
@@ -343,7 +366,7 @@ pub struct ComplianceAlert {
     /// Optional supporting data
     pub supporting_data: Bytes,
     /// Alert status
-    pub status: u8, // AlertStatus as u8
+    pub status: u32, // AlertStatus as u8
     /// Optional resolution notes
     pub resolution_notes: Bytes,
 }
@@ -391,7 +414,7 @@ pub struct SupTechConfig {
     /// Enable automated rules
     pub automated_rules_enabled: bool,
     /// Alert escalation threshold (0-10)
-    pub alert_escalation_threshold: u8,
+    pub alert_escalation_threshold: u32,
     /// Data retention period (seconds)
     pub data_retention_seconds: u64,
 }
@@ -449,8 +472,8 @@ mod tests {
 
     #[test]
     fn test_reporting_standard_symbols() {
-        assert_eq!(ReportingStandard::BCBS239.as_symbol().to_string(), "BCBS239");
-        assert_eq!(ReportingStandard::COREP.as_symbol().to_string(), "COREP");
+        assert_eq!(ReportingStandard::BCBS239.as_str(), "BCBS239");
+        assert_eq!(ReportingStandard::COREP.as_str(), "COREP");
     }
 
     #[test]

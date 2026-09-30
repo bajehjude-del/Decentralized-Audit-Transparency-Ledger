@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 
+use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    contracterror, contracttype, panic_with_error, Address, Bytes, BytesN, Env, Symbol, Vec,
+    bytes, contracterror, contracttype, panic_with_error, symbol_short, Address, Bytes, BytesN,
+    Env, Symbol, Vec,
 };
 
 // ── Error Codes ──────────────────────────────────────────────────────────
@@ -205,34 +207,49 @@ pub enum DataKey {
 
 // ── Helper Functions ────────────────────────────────────────────────────
 
-fn compute_id(env: &Env, prefix: &[u8], data: &[u8]) -> BytesN<32> {
+fn compute_id(env: &Env, prefix: &[u8], data: &Bytes) -> BytesN<32> {
     let mut preimage = Bytes::new(env);
     preimage.append(&Bytes::from_slice(env, prefix));
-    preimage.append(&Bytes::from_slice(env, data));
-    preimage.append(&Self::u64_to_bytes(env, env.ledger().timestamp()));
+    preimage.append(data);
+    preimage.append(&u64_to_bytes(env, env.ledger().timestamp()));
     env.crypto().sha256(&preimage).into()
 }
 
+/// Widen a 4-byte little-endian value into a 32-byte `BytesN` key.
+fn u32_key(bytes: [u8; 4]) -> [u8; 32] {
+    let mut key = [0u8; 32];
+    key[..4].copy_from_slice(&bytes);
+    key
+}
+
 fn u64_to_bytes(env: &Env, v: u64) -> Bytes {
-    bytes!(
-        env,
-        [
-            (v & 0xff) as u8,
-            ((v >> 8) & 0xff) as u8,
-            ((v >> 16) & 0xff) as u8,
-            ((v >> 24) & 0xff) as u8,
-            ((v >> 32) & 0xff) as u8,
-            ((v >> 40) & 0xff) as u8,
-            ((v >> 48) & 0xff) as u8,
-            ((v >> 56) & 0xff) as u8,
-        ]
-    )
+    Bytes::from_array(env, &v.to_le_bytes())
 }
 
 fn require_non_empty(env: &Env, value: &Bytes, error: FinOpsError) {
     if value.is_empty() {
         panic_with_error!(env, error);
     }
+}
+
+fn require_non_empty_id(env: &Env, value: &BytesN<32>, error: FinOpsError) {
+    if *value == BytesN::from_array(env, &[0u8; 32]) {
+        panic_with_error!(env, error);
+    }
+}
+
+/// Render "Budget utilization at 42%" without `format!` (needs a guest allocator).
+fn utilization_message(env: &Env, pct: u32) -> Bytes {
+    let whole = pct / 100;
+    let frac = pct % 100;
+    let mut msg = Bytes::from_slice(env, b"Budget utilization at ");
+    msg.push_back(b'0' + (whole / 10) as u8);
+    msg.push_back(b'0' + (whole % 10) as u8);
+    msg.push_back(b'.');
+    msg.push_back(b'0' + (frac / 10) as u8);
+    msg.push_back(b'0' + (frac % 10) as u8);
+    msg.push_back(b'%');
+    msg
 }
 
 fn validate_amount(env: &Env, amount: u64) {
@@ -255,7 +272,7 @@ pub fn register_cost_center(
     require_non_empty(&env, &name, FinOpsError::InvalidAllocation);
     validate_amount(&env, budget);
 
-    let id = compute_id(&env, b"cost_center", name.as_slice());
+    let id = compute_id(&env, b"cost_center", &name);
 
     if env.storage().persistent().has(&DataKey::CostCenter(id.clone())) {
         panic_with_error!(&env, FinOpsError::CostCenterAlreadyExists);
@@ -283,7 +300,7 @@ pub fn register_cost_center(
         .set(&DataKey::CostCenterCount, &(count + 1));
 
     env.events()
-        .publish((symbol_short!("finops"), symbol_short!("cc_create")), id.clone());
+        .publish((Symbol::new(&env, "finops"), Symbol::new(&env, "cc_create")), id.clone());
 
     id
 }
@@ -365,17 +382,17 @@ pub fn allocate_cost(
         .get(&DataKey::CostCenter(cost_center_id.clone()))
         .unwrap_or_else(|| panic_with_error!(&env, FinOpsError::CostCenterNotFound));
 
-    let id = compute_id(&env, b"allocation", cost_center_id.as_slice());
+    let id = compute_id(&env, b"allocation", &cost_center_id.to_bytes());
 
     let allocation = CostAllocation {
         id: id.clone(),
-        cost_center_id,
-        resource_type,
+        cost_center_id: cost_center_id.clone(),
+        resource_type: resource_type.clone(),
         amount,
         currency,
         period,
         timestamp: env.ledger().timestamp(),
-        submitted_by: caller,
+        submitted_by: caller.clone(),
         metadata,
     };
 
@@ -404,7 +421,7 @@ pub fn allocate_cost(
 
     env.events()
         .publish(
-            (symbol_short!("finops"), symbol_short!("alloc")),
+            (Symbol::new(&env, "finops"), Symbol::new(&env, "alloc")),
             (caller, id.clone()),
         );
 
@@ -423,7 +440,7 @@ pub fn get_allocation(env: Env, id: BytesN<32>) -> CostAllocation {
 pub fn get_center_allocations(env: Env, cost_center_id: BytesN<32>) -> Vec<BytesN<32>> {
     env.storage()
         .persistent()
-        .get(&DataKey::CenterAllocations(cost_center_id))
+        .get(&DataKey::CenterAllocations(cost_center_id.clone()))
         .unwrap_or_else(|| Vec::new(&env))
 }
 
@@ -450,7 +467,7 @@ pub fn create_chargeback(
         .get(&DataKey::CostCenter(cost_center_id.clone()))
         .unwrap_or_else(|| panic_with_error!(&env, FinOpsError::CostCenterNotFound));
 
-    let id = compute_id(&env, b"chargeback", team.as_slice());
+    let id = compute_id(&env, b"chargeback", &team);
 
     let record = ChargebackRecord {
         id: id.clone(),
@@ -478,7 +495,7 @@ pub fn create_chargeback(
 
     env.events()
         .publish(
-            (symbol_short!("finops"), symbol_short!("chargeback")),
+            (symbol_short!("finops"), Symbol::new(&env, "chargeback")),
             (caller, id.clone()),
         );
 
@@ -506,7 +523,7 @@ pub fn create_showback(
         .get(&DataKey::CostCenter(cost_center_id.clone()))
         .unwrap_or_else(|| panic_with_error!(&env, FinOpsError::CostCenterNotFound));
 
-    let id = compute_id(&env, b"showback", team.as_slice());
+    let id = compute_id(&env, b"showback", &team);
 
     let record = ShowbackRecord {
         id: id.clone(),
@@ -533,8 +550,8 @@ pub fn create_showback(
 
     env.events()
         .publish(
-            (symbol_short!("finops"), symbol_short!("showback")),
-            (caller, id.clone()),
+            (Symbol::new(&env, "finops"), Symbol::new(&env, "showback")),
+            (caller.clone(), id.clone()),
         );
 
     id
@@ -569,11 +586,12 @@ pub fn record_resource(
 ) -> BytesN<32> {
     caller.require_auth();
 
-    let id = compute_id(&env, b"resource", resource_type.as_slice());
+    let resource_bytes = resource_type.clone().to_xdr(&env);
+    let id = compute_id(&env, b"resource", &resource_bytes);
 
     let resource = ResourceRecord {
         id: id.clone(),
-        resource_type,
+        resource_type: resource_type.clone(),
         current_size,
         recommended_size: 0,
         monthly_cost,
@@ -598,8 +616,8 @@ pub fn record_resource(
 
     env.events()
         .publish(
-            (symbol_short!("finops"), symbol_short!("resource")),
-            (caller, id.clone()),
+            (Symbol::new(&env, "finops"), Symbol::new(&env, "resource")),
+            (caller.clone(), id.clone()),
         );
 
     id
@@ -631,7 +649,7 @@ pub fn generate_rightsizing(env: Env, caller: Address, resource_id: BytesN<32>) 
         0
     };
 
-    let rec_id = compute_id(&env, b"rightsizing", resource_id.as_slice());
+    let rec_id = compute_id(&env, b"rightsizing", &resource_id.to_bytes());
 
     let recommendation = RightsizingRecommendation {
         resource_id: resource_id.clone(),
@@ -659,7 +677,7 @@ pub fn generate_rightsizing(env: Env, caller: Address, resource_id: BytesN<32>) 
 
     env.events()
         .publish(
-            (symbol_short!("finops"), symbol_short!("rightsize")),
+            (Symbol::new(&env, "finops"), Symbol::new(&env, "rightsize")),
             (caller, rec_id.clone()),
         );
 
@@ -703,7 +721,7 @@ pub fn record_anomaly(
         0
     };
 
-    let id = compute_id(&env, b"anomaly", resource_id.as_slice());
+    let id = compute_id(&env, b"anomaly", &resource_id.to_bytes());
 
     let anomaly = CostAnomaly {
         id: id.clone(),
@@ -732,8 +750,8 @@ pub fn record_anomaly(
 
     env.events()
         .publish(
-            (symbol_short!("finops"), symbol_short!("anomaly")),
-            (caller, id.clone()),
+            (Symbol::new(&env, "finops"), Symbol::new(&env, "anomaly")),
+            (caller.clone(), id.clone()),
         );
 
     id
@@ -751,10 +769,7 @@ pub fn detect_anomalies(env: Env, caller: Address, resource_id: BytesN<32>) -> V
         .unwrap_or(0u32);
 
     for i in 0..count {
-        let key = DataKey::CostAnomaly(BytesN::from_slice(
-            &env,
-            &i.to_le_bytes(),
-        ));
+        let key = DataKey::CostAnomaly(BytesN::from_array(&env, &u32_key(i.to_le_bytes())));
         if let Some(anomaly) = env.storage().persistent().get::<_, CostAnomaly>(&key) {
             if anomaly.resource_id == resource_id && !anomaly.resolved && anomaly.severity >= 2 {
                 anomalies.push_back(anomaly.id);
@@ -805,7 +820,7 @@ pub fn create_budget(
         .get(&DataKey::CostCenter(cost_center_id.clone()))
         .unwrap_or_else(|| panic_with_error!(&env, FinOpsError::CostCenterNotFound));
 
-    let id = compute_id(&env, b"budget", name.as_slice());
+    let id = compute_id(&env, b"budget", &name);
 
     let budget = Budget {
         id: id.clone(),
@@ -834,7 +849,7 @@ pub fn create_budget(
 
     env.events()
         .publish(
-            (symbol_short!("finops"), symbol_short!("budget_create")),
+            (symbol_short!("finops"), Symbol::new(&env, "budget_create")),
             (caller, id.clone()),
         );
 
@@ -861,22 +876,19 @@ pub fn check_budget(env: Env, caller: Address, budget_id: BytesN<32>, current_sp
         0
     };
 
-    let mut alert_id = BytesN::from_slice(&env, &[0u8; 32]);
+    let mut alert_id = BytesN::from_array(&env, &[0u8; 32]);
     let mut triggered = false;
 
     for threshold in budget.alert_thresholds.iter() {
         if utilization_pct >= threshold {
-            alert_id = compute_id(&env, b"alert", budget_id.as_slice());
+            alert_id = compute_id(&env, b"alert", &budget_id.to_bytes());
 
             let alert = BudgetAlert {
                 id: alert_id.clone(),
                 budget_id: budget_id.clone(),
                 current_spend,
                 threshold_pct: threshold,
-                message: Bytes::from_slice(
-                    &env,
-                    format!("Budget utilization at {}%", utilization_pct).as_bytes(),
-                ),
+                message: utilization_message(&env, utilization_pct),
                 timestamp: env.ledger().timestamp(),
                 acknowledged: false,
             };
@@ -902,7 +914,7 @@ pub fn check_budget(env: Env, caller: Address, budget_id: BytesN<32>, current_sp
     if triggered {
         env.events()
             .publish(
-                (symbol_short!("finops"), symbol_short!("budget_alert")),
+                (symbol_short!("finops"), Symbol::new(&env, "budget_alert")),
                 (caller, alert_id.clone()),
             );
     }
@@ -937,7 +949,7 @@ pub fn generate_dashboard(env: Env) -> CostDashboard {
         .unwrap_or(0u32);
 
     for i in 0..allocation_count {
-        let key = DataKey::CostAllocation(BytesN::from_slice(&env, &i.to_le_bytes()));
+        let key = DataKey::CostAllocation(BytesN::from_array(&env, &u32_key(i.to_le_bytes())));
         if let Some(alloc) = env.storage().persistent().get::<_, CostAllocation>(&key) {
             total_cost += alloc.amount;
         }
@@ -950,7 +962,7 @@ pub fn generate_dashboard(env: Env) -> CostDashboard {
         .unwrap_or(0u32);
 
     for i in 0..anomaly_count {
-        let key = DataKey::CostAnomaly(BytesN::from_slice(&env, &i.to_le_bytes()));
+        let key = DataKey::CostAnomaly(BytesN::from_array(&env, &u32_key(i.to_le_bytes())));
         if let Some(anomaly) = env.storage().persistent().get::<_, CostAnomaly>(&key) {
             if !anomaly.resolved {
                 active_anomalies += 1;
@@ -965,7 +977,7 @@ pub fn generate_dashboard(env: Env) -> CostDashboard {
         .unwrap_or(0u32);
 
     for i in 0..rightsizing_count {
-        let key = DataKey::RightsizingRec(BytesN::from_slice(&env, &i.to_le_bytes()));
+        let key = DataKey::RightsizingRec(BytesN::from_array(&env, &u32_key(i.to_le_bytes())));
         if let Some(rec) = env.storage().persistent().get::<_, RightsizingRecommendation>(&key) {
             total_savings += rec.monthly_savings;
         }
@@ -979,7 +991,7 @@ pub fn generate_dashboard(env: Env) -> CostDashboard {
 
     let mut budget_util = 0u32;
     for i in 0..budget_count {
-        let key = DataKey::Budget(BytesN::from_slice(&env, &i.to_le_bytes()));
+        let key = DataKey::Budget(BytesN::from_array(&env, &u32_key(i.to_le_bytes())));
         if let Some(budget) = env.storage().persistent().get::<_, Budget>(&key) {
             if budget.active {
                 let center_allocs = get_center_allocations(env.clone(), budget.cost_center_id.clone());
@@ -1021,7 +1033,7 @@ pub fn get_cost_summary(env: Env, period: Bytes) -> CostSummary {
         .unwrap_or(0u32);
 
     for i in 0..allocation_count {
-        let key = DataKey::CostAllocation(BytesN::from_slice(&env, &i.to_le_bytes()));
+        let key = DataKey::CostAllocation(BytesN::from_array(&env, &u32_key(i.to_le_bytes())));
         if let Some(alloc) = env.storage().persistent().get::<_, CostAllocation>(&key) {
             if alloc.period == period {
                 total_cost += alloc.amount;
@@ -1038,7 +1050,7 @@ pub fn get_cost_summary(env: Env, period: Bytes) -> CostSummary {
         total_cost,
         forecasted_cost: forecasted,
         variance_pct: 0,
-        top_drivers,
+        top_cost_drivers: top_drivers,
         timestamp: env.ledger().timestamp(),
     }
 }
@@ -1071,7 +1083,7 @@ pub fn get_active_anomaly_count(env: Env) -> u32 {
 
     let mut active = 0u32;
     for i in 0..count {
-        let key = DataKey::CostAnomaly(BytesN::from_slice(&env, &i.to_le_bytes()));
+        let key = DataKey::CostAnomaly(BytesN::from_array(&env, &u32_key(i.to_le_bytes())));
         if let Some(anomaly) = env.storage().persistent().get::<_, CostAnomaly>(&key) {
             if !anomaly.resolved {
                 active += 1;

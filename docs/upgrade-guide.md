@@ -15,11 +15,36 @@ A step-by-step guide for upgrading AuditLedger contract logic and migrating even
 ### Risks
 
 | Risk | Impact | Mitigation |
-|------|--------|-----------|
+|------|--------|------------|
 | Data loss | Permanent; events are immutable but storage keys can become unreachable | Backup all events off-chain before upgrading |
 | Contract downtime | New WASM replaces the old one atomically; there is no swap/warmup period | Freeze logging before upgrade to prevent in-flight writes |
 | Broken integrations | Callers using removed functions or changed argument order will fail | Notify integrators; version the API |
 | Storage key collision | Old `DataKey` variants encoded differently than new ones silently corrupt reads | Keep tombstone variants in the enum; never reuse ordinals |
+
+---
+
+## Storage Layout Compatibility Rules
+
+Soroban stores values keyed by the XDR-encoded form of a `DataKey` enum variant. The encoding is positional: the ordinal of a variant in the enum determines its on-chain key. Breaking these rules can silently corrupt reads or make existing data unreachable.
+
+1. **Never reorder or remove existing variants.** Append new variants at the end of the enum only. Removing a variant shifts the ordinals of every variant after it.
+2. **Keep tombstone variants.** If a key is retired, replace it with a tombstone variant that is never written to again. Do not reuse its ordinal for a new key.
+3. **Never change the field order of a `#[contracttype]` struct used as a storage value.** XDR encodes struct fields in declaration order. Reordering fields changes the encoding and corrupts existing values. Add new fields at the end only.
+4. **Add new mandatory fields with a default or via migration.** If a new field has no sensible default, write a migration function that backfills it before readers depend on it.
+5. **Do not change the storage tier of an existing key.** Moving a key from `instance()` to `persistent()` or vice versa makes the old value unreachable.
+6. *(Do not change the `ScoVal / `Symbol` shape of a key.** A `Tuple(Symbol("event"), U32))` and a `Tuple(Symbol("event"), U32))` key must keep the same arrity and types.
+
+### Compatibility matrix
+
+| Change | Compatible? | Notes |
+|--------|-------------|-------|
+| Append new `DataKey` variant at end | ✅ Yes | Old keys keep their ordinals |
+| Add new field at end of a contracttype struct | ✅ Yes | XDR encodes in declaration order |
+| Reorder existing enum variants | ❌ No | Corrupts every key after the change |
+| Remove a variant without a tombstone | ❌ No | Shifts ordinals of subsequent variants |
+| Rename a variant with the same ordinal | ✅ Yes* | *The name is not part of the encoding, but keep the old name as an alias for readability |
+| Change a key's storage tier | ❌ No | Old value becomes unreachable |
+| Change a key's XDR type (e.g. `u32` → `u64`) | ❌ No | Encoding differs; old values are unreadable |
 
 ---
 
@@ -42,7 +67,18 @@ Complete every item before invoking the WASM upgrade.
   ```
   Save these values — you will compare them after the upgrade.
 
-- [ ] **Notify all integrators** of the planned upgrade window, expected downtime, and any API changes. Allow at least 48 hours notice for production systems.
+-  [ ] **Run the pre-upgrade validation tool** to catch storage layout, function signature, and event schema breaks:
+  ```bash
+  bash tools/upgrade/validate.sh \
+    --old-wasm target/wasm32-unknown-unknown/release/audit_ledger.optimized.wasm \
+    --new-wasm target/wasm32-unknown-unknown/release/audit_ledger.optimized.wasm
+  ```
+  The validator fails the build if any of the following are detected:
+  - a `DataKey` variant was removed or reordered,
+  - a public function signature changed in a non-additive way,
+  - an `Event` field was reordered or a field was removed.
+
+- [ ] **Notify all integrators** of the planned upgrade window, expected downtime, and any API changes. Allow at least 48 hours notice for production systems. Use the announcement template in `docs/upgrade-announcement.md`.
 
 - [ ] **Freeze event logging** by setting `global_max_logs` to the current `total_events` value:
   ```bash
@@ -55,9 +91,13 @@ Complete every item before invoking the WASM upgrade.
 
 - [ ] **Test the new WASM on a forked or standalone network** before applying to testnet/mainnet. The GitHub Actions workflow runs tests automatically on every push.
 
+- [ ] **Confirm rollback readiness.** The previous WASM hash must still be available on-chain (or re-uploadable). Record it in the upgrade ticket.
+
+- [ ] **Confirm emergency contacts** are on call for the upgrade window. See the Rollback Plan section below.
+
 ---
 
-## WASM Upgrade
+## Wasm Upgrade
 
 Soroban supports in-place WASM replacement via `env.deployer().update_current_contract_wasm()`. The contract address, storage, and state are preserved; only the executable code changes.
 
@@ -108,20 +148,46 @@ Most upgrades do not require data migration — if you only add new `DataKey` va
 - A key was renamed or replaced (e.g., `GlobalMaxLogs` + `TotalEvents` → `Config`).
 - A new mandatory field was added to `Event` with no default.
 
-### Running a migration function
+### Migration step model
 
-Add a one-time `migrate_v1_to_v2` function to the contract before upgrading:
+The contract exposes a generic migration entrypoint:
 
 ```rust
-pub fn migrate_v1_to_v2(env: Env, caller: Address) {
+pub fn migrate_storage(env: Env, caller: Address, migration_steps: Vec<MigrationStep>) {
     caller.require_auth();
     Self::require_owner(&env, &caller);
-    // Example: fold separate GlobalMaxLogs + TotalEvents into Config
-    let max: u32 = env.storage().instance().get(&DataKey::GlobalMaxLogs).unwrap();
-    let total: u32 = env.storage().instance().get(&DataKey::TotalEvents).unwrap();
-    env.storage().instance().set(&DataKey::Config, &Config { global_max_logs: max, total_events: total });
-    // Leave old keys as tombstones; do not remove them to avoid accidental re-use
+    for step in migration_steps.iter() {
+        Self::apply_migration_step(&env, &step);
+    }
 }
+```
+
+Each `MigrationStep` is a declarative description of a single storage mutation. Supported kinds are:
+
+| Kind | Purpose |
+|------|--------|
+| `CopyKey` | Copy a value from one `DataKey` to another |
+| `RenameKey` | Copy then leave the old key as a tombstone |
+| `SetDefault` | Write a default value if the key is absent |
+| `RemoveKey` | Delete a key only after a verified copy exists |
+
+Example — fold separate `GlobalMaxLogs` + `TotalEvents` into `Config`:
+
+```rust
+let steps = vec![
+    &el,
+    MigrationStep {
+        kind: MigrationKind::CopyKey,
+        from: DataKey::GlobalMaxLogs,
+        to: DataKey::Config,
+    },
+    MigrationStep {
+        kind: MigrationKind::SetDefault,
+        from: DataKey::TotalEvents,
+        to: DataKey::Config,
+    },
+];
+Self::migrate_storage(&env, &caller, &steps);
 ```
 
 After the WASM upgrade:
@@ -129,8 +195,24 @@ After the WASM upgrade:
 ```bash
 soroban contract invoke \
   --id $CONTRACT_ID --source $OWNER_KEY --network testnet \
-  -- migrate_v1_to_v2 --caller $OWNER_ADDRESS
+  -- migrate_storage \
+  --caller $OWNER_ADDRESS \
+  --migration_steps '[
+{"kind":"CopyKey","from":"GlobalMaxLogs","to":"Config"},{"kind":"SetDefault","from":"TotalEvents","to":"Config"}]'
 ```
+
+### Migration script generator
+
+For large or repetitive migrations, generate the call from a machine-readable layout diff:
+
+```bash
+bash tools/upgrade/generate-migration.sh \
+  --old-layout docs/storage-layout-v1.json \
+  --new-layout docs/storage-layout-v2.json \
+  --out tools/upgrade/migration-v1-to-v2.sh
+```
+
+The generator emits a script that invokes `migrate_storage` with the correct `migration_steps` array and a matching rollback script. Commit both scripts alongside the upgrade PR.
 
 ### Verify event data integrity
 
@@ -142,9 +224,11 @@ soroban contract invoke --id $CONTRACT_ID --network testnet \
   -- get_event_by_order --order_index 0
 
 # Check last event
-LAST=$(($(soroban contract invoke --id $CONTRACT_ID --network testnet -- total_events) - 1))
+LAST=$(($soroban contract invoke --id $CONTRACT_ID --network testnet -- total_events) - 1))
 soroban contract invoke --id $CONTRACT_ID --network testnet \
   -- get_event_by_order --order_index "$LAST"
+soroban contract invoke --id $CONTRACT_ID --network testnet \
+  -- verify_chain
 ```
 
 ---
@@ -168,14 +252,19 @@ soroban contract invoke --id $CONTRACT_ID --network testnet \
    soroban contract invoke --id $CONTRACT_ID --network testnet -- get_owner
    ```
 
-4. **Unfreeze logging** by restoring the desired `global_max_logs`:
+4. **Verify the hash chain end-to-end:**
+   ```bash
+   soroban contract invoke --id $CONTRACT_ID --network testnet -- verify_chain
+   ```
+
+5. **Unfreeze logging** by restoring the desired `global_max_logs`:
    ```bash
    soroban contract invoke \
      --id $CONTRACT_ID --source $OWNER_KEY --network testnet \
      -- set_global_max_logs --caller $OWNER_ADDRESS --new_max 500000
    ```
 
-5. **Run a smoke-test log event** to confirm writes work end-to-end:
+6. **Run a smoke-test log event** to confirm writes work end-to-end:
    ```bash
    soroban contract invoke \
      --id $CONTRACT_ID --source $SUBMITTER_KEY --network testnet \
@@ -201,10 +290,16 @@ Soroban does not provide a built-in rollback; a rollback is another upgrade to t
     --network testnet)
   ```
 
+- The rollback script generated by `tools/upgrade/generate-migration.sh` must be available and reviewed.
+
 ### Steps
 
 1. **Freeze logging** (same as pre-upgrade step) to prevent writes during rollback.
-2. **Upgrade back** to the previous WASM:
+2. **Run the rollback migration** to undo forward migration steps (copy new keys back to old ones, then leave the new keys as tombstones):
+   ```bash
+   bash tools/upgrade/migration-v2-to-v1.sh --contract-id $CONTRACT_ID --network testnet
+   ```
+3. **Upgrade back** to the previous WASM:
    ```bash
    soroban contract invoke \
      --id $CONTRACT_ID --source $OWNER_KEY --network testnet \
@@ -212,11 +307,11 @@ Soroban does not provide a built-in rollback; a rollback is another upgrade to t
      --caller $OWNER_ADDRESS \
      --new_wasm_hash "$PREV_HASH"
    ```
-3. **If data migration ran**, undo it by invoking a `rollback_v2_to_v1` function (write this before upgrading — not after):
+4. **If data migration ran**, undo it by invoking a `rollback_v2_to_v1` function (write this before upgrading — not after):
    - Restoring from the off-chain backup via `tools/backup/restore.sh` may be the only option if forward-migration is not reversible.
-4. **Verify state** using the post-upgrade verification steps above.
-5. **Unfreeze logging.**
-6. **Notify integrators** of the rollback.
+5. **Verify state** using the post-upgrade verification steps above.
+6. **Unfreeze logging.**
+7. **Notify integrators** of the rollback.
 
 ### Restoring from backup
 
@@ -238,3 +333,103 @@ bash tools/backup/restore.sh --contract-id $NEW_CONTRACT_ID
 ```
 
 > **Warning:** Replayed events will have new timestamps and new IDs. External systems referencing old event IDs must be updated.
+
+### Emergency contacts
+
+| Role | Name | Contact | Escalation window |
+|------|------|---------|------------------|
+| Primary on-call engineer | ________ | Pager | Immediate |
+| Contract owner | ________ | Pager + email | 15 minutes |
+| Security lead | ________ | Pager + email | 30 minutes |
+| Integrator liaison | ________ | Email | 4 hours |
+
+Replace the placeholders above with the current on-call rotation before each upgrade.
+
+---
+
+## Upgrade Testing Procedures (Testnet & Staging)
+
+1. **Local forked network.** Run the full upgrade against a fork of testnet state to catch migration bugs before touching any shared network.
+2. **Testnet.** Apply the upgrade and migration on testnet and run the full post-upgrade verification checklist. Observe for at least 24 hours.
+3. **Staging.** Apply the upgrade to a staging deployment that mirrors production configuration and integrations. Run integrator smoke tests against the staging endpoint.
+4. **Mainnet.** Apply the upgrade during the announced window and run the post-upgrade verification checklist immediately.
+
+---
+
+## CI Integration for Upgrade Simulation
+
+The repository includes a GitHub Actions workflow that simulates an upgrade on every push to a branch that touches the contract or the upgrade tooling:
+
+```yaml
+name: Upgrade Simulation
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tools/upgrade/**"
+      - "docs/upgrade-guide.md"
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-rust@masterbanch
+      - name: Build new WASM
+        run: cargo build --target wasm32-unknown-unknown --release
+      - name: Validate storage layout and API
+        run: bash tools/upgrade/validate.sh --old-wasm $OLD_WASP --new-wasm target/wasm32-unknown-unknown/release/audit_ledger.wasm
+        env:
+          OLD_WASP: $ {{ secrets.OLD_WASM }}
+      - name: Run upgrade simulation
+        run: bash tools/upgrade/simulate.sh --new-wasm target/wasm32-unknown-unknown/release/audit_ledger.wasm
+      - name: Upload simulation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-simulation-report
+          path: tools/upgrade/out/simulation-report.json
+```
+
+The simulation deploys the old WASM to an ephemeral network, seeds it with sample state, applies the new WASM and the generated migration script, and asserts that the post-upgrade state matches the expected layout.
+
+---
+
+## Upgrade Announcement Template
+
+Send this to all integrators at least 48 hours before the upgrade window. A copy is maintained in `docs/upgrade-announcement.md`.
+
+```markdown
+Subject: [AuditLedger] Scheduled contract upgrade on <NETWORK> at <UTC>
+
+Hello,
+
+We will upgrade the AuditLedger contract on <NETWORK> at <UTC>.
+
+- Contract ID: <CONTRACT_ID>
+- New WASM hash: <NEW_HASH>
+- Expected downtime: <DOWNTIME>
+- API changes: <SUMMARY>
+- Rollback window: <ROLLBACK_WINDOW>
+
+Action required from integrators:
+- Review the API changes above.
+- Pause writes during the window if you can't tolerate retries.
+- Report any anomalies to <EMERGENCY_CONTACT>.
+
+Thanks,
+<AuditLedger maintainers>
+```
+
+---
+
+## Post-Upgrade Verification Checklist
+
+- [ ] `total_events` matches the pre-upgrade snapshot.
+-  [ ] `verify_chain` returns true.
+-  [ ] get_owner` returns the expected owner address.
+-  [ ] a sample of events from the off-chain backup returns the expected data.
+-  [ ] `global_max_logs` is restored to the desired value.
+-  [ ] a smoke-test `log_event` succeeds.
+-  [ ] all integrators are notified that the upgrade is complete.
+-  [ ] the upgrade ticket is updated with the new WASM hash, the migration script hash, and the verification evidence.

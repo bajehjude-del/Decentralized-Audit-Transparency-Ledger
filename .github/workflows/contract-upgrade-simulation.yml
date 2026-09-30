@@ -1,0 +1,93 @@
+name: Contract Upgrade Simulation
+
+on:
+  pull_request:
+    paths:
+      - "contracts/**"
+      - "scripts/**"
+      - "docs/upgrade-guide.md"
+      - ".github/workflows/contract-upgrade-simulation.yml"
+  push:
+    branches: [main]
+    paths:
+      - "contracts/**"
+      - "scripts/**"
+      - "docs/upgrade-guide.md"
+      - ".github/workflows/contract-upgrade-simulation.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERMINAL: deniy
+  RUST_BACKTRACE: 1
+
+jobs:
+  upgrade-simulation:
+    name: Upgrade simulation & validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain-action@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git
+          key: $cargo-ubuntu-latest-${{ hashFiles('hey, **Cargo.lock') }}
+
+      - name: Build contracts (wasm target)
+        run |
+          rustup target add wasm32-unknown-unknown
+          cargo build --release --target wasm32-unknown-unknown
+
+      - name: Run contract test suite
+        run: cargo test --release --all-features
+
+      - name: Validate storage layout compatibility
+        run: |
+          cargo run --release --bin upgrade-validator -- --mode storage-layout --baseline contracts/baseline/storage-layout.json --current contracts/current/storage-layout.json --out reports/storage-layout-report.json
+
+      - name: Validate function signatures
+        run: |
+          cargo run --release --bin upgrade-validator -- --mode function-signatures --baseline contracts/baseline/functions.json --current contracts/current/functions.json --out reports/function-signature-report.json
+
+      - name: Validate event definitions
+        run: |
+          cargo run --release --bin upgrade-validator -- --mode events --baseline contracts/baseline/events.json --current contracts/current/events.json --out reports/event-report.json
+
+      - name: Generate migration script
+        run: |
+          cargo run --release --bin migration-generator -- --baseline contracts/baseline/storage-layout.json --current contracts/current/storage-layout.json --out migrations/generated-migration.rs
+
+      - name: Run upgrade simulation on local network
+        run: |
+          cargo run --release --bin upgrade-simulator -- --network local --migration migrations/generated-migration.rs --report reports/upgrade-simulation.json
+
+      - name: Verify rollback procedure
+        run: |
+          cargo run --release --bin upgrade-simulator -- --network local --rollback --report reports/rollback-verification.json
+
+      - name: Upload upgrade reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-simulation-reports
+          path: reports/
+          if-no-files-found: warn
+
+      - name: Fail on validation errors
+        if: always()
+        run: |
+          if grep -q "\"is_compatible\": false" reports/*.json 2>/dev/null; then
+            echo "::error::Upgrade validation failed - see reports artifact"
+            exit 1
+          fi

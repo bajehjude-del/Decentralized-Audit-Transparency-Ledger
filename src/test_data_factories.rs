@@ -213,7 +213,7 @@ impl GovernanceActionFactory {
 }
 
 impl Factory<ProposalAction> for GovernanceActionFactory {
-    fn build(&self, env: &Env) -> ProposalAction {
+    fn build(&self, _env: &Env) -> ProposalAction {
         ProposalAction::Pause
     }
 }

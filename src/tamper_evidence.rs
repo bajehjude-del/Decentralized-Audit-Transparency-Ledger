@@ -4,7 +4,6 @@
 //! prove event immutability, and validate audit trail integrity.
 
 use soroban_sdk::{contracttype, BytesN, Env, Vec};
-use crate::regulator::TamperProof;
 
 /// Result of a chain verification operation
 #[contracttype]
@@ -112,7 +111,7 @@ impl TamperEvidenceHelper {
     pub fn verify_chain_link(
         current_event_hash: &BytesN<32>,
         current_prev_hash: &BytesN<32>,
-        next_event_hash: &BytesN<32>,
+        _next_event_hash: &BytesN<32>,
         next_prev_hash: &BytesN<32>,
     ) -> bool {
         // The current event's hash should match next event's prev_hash
@@ -215,8 +214,8 @@ impl TamperEvidenceHelper {
         let valid = !merkle_path.is_empty();
 
         ArchiveProof {
-            event_hash: *event_hash,
-            archive_root: *archive_root,
+            event_hash: event_hash.clone(),
+            archive_root: archive_root.clone(),
             merkle_path,
             valid,
         }

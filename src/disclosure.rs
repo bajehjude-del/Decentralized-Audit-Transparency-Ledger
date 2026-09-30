@@ -117,7 +117,7 @@ impl ProofBuilder {
         disclosed: bool,
     ) -> Self {
         self.all_fields.push_back(FieldHash {
-            field_name,
+            field_name: field_name.clone(),
             hash,
             disclosed,
         });
@@ -190,12 +190,12 @@ pub struct DisclosureHelper;
 impl DisclosureHelper {
     /// Verify that a disclosed field is part of the complete event hash
     pub fn verify_field_inclusion(
-        env: &Env,
+        _env: &Env,
         field_proof: &FieldDisclosureProof,
         expected_root: &BytesN<32>,
     ) -> bool {
         // Reconstruct the hash path from leaf to root
-        let mut current_hash = field_proof.field_hash;
+        let mut current_hash = field_proof.field_hash.clone();
         
         for i in 0..field_proof.sibling_hashes.len() {
             let sibling = field_proof.sibling_hashes.get(i).unwrap();
@@ -222,7 +222,7 @@ impl DisclosureHelper {
         complete_root: BytesN<32>,
     ) -> SelectiveDisclosureProof {
         let mut disclosed_root = BytesN::<32>::from_array(env, &[0u8; 32]);
-        let mut merkle_proof = Vec::new(env);
+        let merkle_proof = Vec::new(env);
 
         // Calculate root from disclosed fields only
         let builder = {
@@ -264,11 +264,11 @@ impl DisclosureHelper {
         event_index: u32,
         compliance_criteria: Vec<Symbol>,
     ) -> SelectiveDisclosureProof {
-        let mut criteria_root = BytesN::<32>::from_array(env, &[0u8; 32]);
+        let criteria_root = BytesN::<32>::from_array(env, &[0u8; 32]);
         let mut merkle_proof = Vec::new(env);
 
         // Build Merkle tree from compliance criteria
-        for criteria in compliance_criteria.iter() {
+        for _criteria in compliance_criteria.iter() {
             // Hash each criteria with a fixed prefix
             merkle_proof.push_back(BytesN::<32>::from_array(env, &[0u8; 32]));
         }

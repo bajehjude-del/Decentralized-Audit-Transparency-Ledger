@@ -1,7 +1,8 @@
 #![no_std]
 
 use crate::sandbox_types::*;
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env};
+use soroban_sdk::xdr::ToXdr;
 
 /// Sandbox management system for application processing and participant lifecycle.
 pub struct SandboxManager;
@@ -32,9 +33,9 @@ impl SandboxManager {
             application_id,
             applicant,
             organization_name,
-            participant_type: participant_type as u8,
-            requested_environment: requested_environment as u8,
-            status: ApplicationStatus::Submitted as u8,
+            participant_type: participant_type as u32,
+            requested_environment: requested_environment as u32,
+            status: ApplicationStatus::Submitted as u32,
             submitted_at: env.ledger().timestamp(),
             reviewed_at: None,
             description,
@@ -51,11 +52,11 @@ impl SandboxManager {
     ) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, applicant.to_xdr().as_ref()));
+        input.append(&applicant.to_xdr(env));
         input.append(organization_name);
         input.append(&Bytes::from_slice(env, &env.ledger().timestamp().to_le_bytes()));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Approve application and create participant
@@ -64,7 +65,7 @@ impl SandboxManager {
         application: &mut SandboxApplication,
         assigned_supervisor: Address,
     ) -> Result<SandboxParticipant, &'static str> {
-        if application.status != ApplicationStatus::Submitted as u8 {
+        if application.status != ApplicationStatus::Submitted as u32 {
             return Err("Application must be in submitted state");
         }
 
@@ -72,7 +73,7 @@ impl SandboxManager {
         let now = env.ledger().timestamp();
         let exit_date = now + ((application.expected_duration_days as u64) * 86400);
 
-        application.status = ApplicationStatus::Approved as u8;
+        application.status = ApplicationStatus::Approved as u32;
         application.reviewed_at = Some(now);
 
         Ok(SandboxParticipant {
@@ -94,11 +95,11 @@ impl SandboxManager {
         env: &Env,
         application: &mut SandboxApplication,
     ) -> Result<(), &'static str> {
-        if application.status == ApplicationStatus::Approved as u8 {
+        if application.status == ApplicationStatus::Approved as u32 {
             return Err("Cannot reject approved application");
         }
 
-        application.status = ApplicationStatus::Rejected as u8;
+        application.status = ApplicationStatus::Rejected as u32;
         application.reviewed_at = Some(env.ledger().timestamp());
 
         Ok(())
@@ -106,14 +107,14 @@ impl SandboxManager {
 
     /// Request additional information
     pub fn request_additional_info(
-        env: &Env,
+        _env: &Env,
         application: &mut SandboxApplication,
     ) -> Result<(), &'static str> {
-        if application.status != ApplicationStatus::Submitted as u8 {
+        if application.status != ApplicationStatus::Submitted as u32 {
             return Err("Application must be in submitted state");
         }
 
-        application.status = ApplicationStatus::AdditionalInfoRequested as u8;
+        application.status = ApplicationStatus::AdditionalInfoRequested as u32;
         Ok(())
     }
 
@@ -121,10 +122,10 @@ impl SandboxManager {
     pub fn compute_participant_id(env: &Env, applicant: &Address) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, applicant.to_xdr().as_ref()));
+        input.append(&applicant.to_xdr(env));
         input.append(&Bytes::from_slice(env, b"PARTICIPANT"));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Extend participant duration
@@ -266,7 +267,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(app.status, ApplicationStatus::Submitted as u8);
+        assert_eq!(app.status, ApplicationStatus::Submitted as u32);
         assert_eq!(app.expected_duration_days, 90);
     }
 
@@ -295,7 +296,7 @@ mod tests {
             SandboxManager::approve_application(&env, &mut app, supervisor).unwrap();
 
         assert!(participant.is_active);
-        assert_eq!(app.status, ApplicationStatus::Approved as u8);
+        assert_eq!(app.status, ApplicationStatus::Approved as u32);
     }
 
     #[test]
@@ -305,8 +306,8 @@ mod tests {
             participant_id: BytesN::zero(),
             name: Bytes::from_slice(&env, b"Corp"),
             address: soroban_sdk::Address::generate(&env),
-            participant_type: ParticipantType::Fintech as u8,
-            environment: SandboxEnvironment::Level1PoC as u8,
+            participant_type: ParticipantType::Fintech as u32,
+            environment: SandboxEnvironment::Level1PoC as u32,
             entry_date: 1000,
             planned_exit_date: 10000,
             is_active: true,
@@ -327,8 +328,8 @@ mod tests {
             participant_id: BytesN::zero(),
             name: Bytes::from_slice(&env, b"Corp"),
             address: soroban_sdk::Address::generate(&env),
-            participant_type: ParticipantType::Fintech as u8,
-            environment: SandboxEnvironment::Level1PoC as u8,
+            participant_type: ParticipantType::Fintech as u32,
+            environment: SandboxEnvironment::Level1PoC as u32,
             entry_date: 1000,
             planned_exit_date: 1000 + (90 * 86400),
             is_active: true,

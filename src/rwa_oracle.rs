@@ -420,7 +420,7 @@ pub fn compute_canonical_hash(
     buf.append(&Bytes::from_slice(env, id_bytes.as_bytes()));
     buf.append(&Bytes::from_slice(env, &price.to_le_bytes()));
     buf.append(&Bytes::from_slice(env, &consensus_at.to_le_bytes()));
-    buf.append(&Bytes::from_slice(env, prev_hash.as_ref()));
+    buf.append(&prev_hash.to_bytes());
     env.crypto().sha256(&buf)
 }
 

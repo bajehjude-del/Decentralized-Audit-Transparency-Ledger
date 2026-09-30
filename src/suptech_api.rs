@@ -1,7 +1,8 @@
 #![no_std]
 
-use crate::suptech_types::{Supervisor, SupervisorRole, ComplianceAlert, AlertStatus, RegulatoryFramework};
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use crate::suptech_types::{Supervisor, SupervisorRole, ComplianceAlert, RegulatoryFramework};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::xdr::ToXdr;
 
 /// Dashboard query for supervisor analytics.
 #[contracttype]
@@ -52,7 +53,7 @@ pub struct AlertSubscription {
     /// Subscriber
     pub subscriber: Address,
     /// Alert types to subscribe to (severity levels)
-    pub severity_threshold: u8, // 0-10, receive alerts at or above this level
+    pub severity_threshold: u32, // 0-10, receive alerts at or above this level
     /// Alert categories (filters)
     pub category_filters: Vec<Bytes>,
     /// Active
@@ -80,8 +81,8 @@ impl SupervisorAPI {
         Ok(Supervisor {
             supervisor_id,
             address,
-            framework: framework as u8,
-            role: role as u8,
+            framework: framework as u32,
+            role: role as u32,
             subscribed_feeds: Vec::new(env),
             created_at: env.ledger().timestamp(),
             is_active: true,
@@ -93,10 +94,10 @@ impl SupervisorAPI {
     pub fn compute_supervisor_id(env: &Env, address: &Address) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, address.to_xdr().as_ref()));
+        input.append(&address.to_xdr(env));
         input.append(&Bytes::from_slice(env, b"SUPERVISOR"));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Check if supervisor has permission for operation
@@ -109,10 +110,10 @@ impl SupervisorAPI {
         }
 
         let role = match supervisor.role {
-            r if r == SupervisorRole::Observer as u8 => SupervisorRole::Observer,
-            r if r == SupervisorRole::Analyst as u8 => SupervisorRole::Analyst,
-            r if r == SupervisorRole::Administrator as u8 => SupervisorRole::Administrator,
-            r if r == SupervisorRole::SuperAdministrator as u8 => SupervisorRole::SuperAdministrator,
+            r if r == SupervisorRole::Observer as u32 => SupervisorRole::Observer,
+            r if r == SupervisorRole::Analyst as u32 => SupervisorRole::Analyst,
+            r if r == SupervisorRole::Administrator as u32 => SupervisorRole::Administrator,
+            r if r == SupervisorRole::SuperAdministrator as u32 => SupervisorRole::SuperAdministrator,
             _ => return Err("Invalid supervisor role"),
         };
 
@@ -175,11 +176,11 @@ impl SupervisorAPI {
     ) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, executor.to_xdr().as_ref()));
+        input.append(&executor.to_xdr(env));
         input.append(query_type);
         input.append(&Bytes::from_slice(env, &env.ledger().timestamp().to_le_bytes()));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Create dashboard view
@@ -215,17 +216,17 @@ impl SupervisorAPI {
     pub fn compute_view_id(env: &Env, owner: &Address, name: &Bytes) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, owner.to_xdr().as_ref()));
+        input.append(&owner.to_xdr(env));
         input.append(name);
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Subscribe to alerts
     pub fn subscribe_to_alerts(
         env: &Env,
         subscriber: Address,
-        severity_threshold: u8,
+        severity_threshold: u32,
     ) -> Result<AlertSubscription, &'static str> {
         if severity_threshold > 10 {
             return Err("Severity must be 0-10");
@@ -248,10 +249,10 @@ impl SupervisorAPI {
     pub fn compute_alert_subscription_id(env: &Env, subscriber: &Address) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, subscriber.to_xdr().as_ref()));
+        input.append(&subscriber.to_xdr(env));
         input.append(&Bytes::from_slice(env, b"ALERT_SUB"));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Deliver alert to subscriber
@@ -274,7 +275,7 @@ impl SupervisorAPI {
             let has_matching_category = subscription
                 .category_filters
                 .iter()
-                .any(|filter| {
+                .any(|_filter| {
                     // In a real implementation, would do proper text matching
                     true
                 });
@@ -361,8 +362,8 @@ mod tests {
         .unwrap();
 
         assert!(supervisor.is_active);
-        assert_eq!(supervisor.framework, RegulatoryFramework::FSB as u8);
-        assert_eq!(supervisor.role, SupervisorRole::Analyst as u8);
+        assert_eq!(supervisor.framework, RegulatoryFramework::FSB as u32);
+        assert_eq!(supervisor.role, SupervisorRole::Analyst as u32);
     }
 
     #[test]

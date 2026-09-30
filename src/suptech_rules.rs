@@ -1,7 +1,8 @@
 #![no_std]
 
 use crate::suptech_types::{SupervisionRule, ComplianceAlert, AlertStatus, RegulatoryFramework};
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::xdr::ToXdr;
 
 /// Rule evaluation result.
 #[contracttype]
@@ -16,7 +17,7 @@ pub struct RuleEvaluation {
     /// Evaluation context (transaction ID, account, etc.)
     pub context: Bytes,
     /// Severity score (0-10)
-    pub severity_score: u8,
+    pub severity_score: u32,
 }
 
 /// Rule execution log entry.
@@ -34,7 +35,7 @@ pub struct RuleExecutionLog {
     /// Number of times triggered
     pub trigger_count: u32,
     /// Highest severity alert generated
-    pub max_alert_severity: u8,
+    pub max_alert_severity: u32,
 }
 
 /// Rule set for regulatory framework.
@@ -44,7 +45,7 @@ pub struct RuleSet {
     /// Rule set ID
     pub ruleset_id: BytesN<32>,
     /// Associated regulatory framework
-    pub framework: u8, // RegulatoryFramework as u8
+    pub framework: u32, // RegulatoryFramework as u32
     /// Rules in set
     pub rules: Vec<BytesN<32>>,
     /// Rule set version
@@ -68,7 +69,7 @@ impl RulesEngine {
         name: Bytes,
         condition: Bytes,
         action: Bytes,
-        severity: u8,
+        severity: u32,
     ) -> Result<SupervisionRule, &'static str> {
         if name.is_empty() {
             return Err("Rule name cannot be empty");
@@ -87,7 +88,7 @@ impl RulesEngine {
         Ok(SupervisionRule {
             rule_id,
             name,
-            framework: framework as u8,
+            framework: framework as u32,
             condition,
             action,
             severity,
@@ -105,13 +106,10 @@ impl RulesEngine {
     ) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(
-            env,
-            framework.as_symbol().to_string().as_bytes(),
-        ));
+        input.append(&Bytes::from_slice(env, framework.code().as_bytes()));
         input.append(name);
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Evaluate rule against context
@@ -154,7 +152,7 @@ impl RulesEngine {
             message: rule.name.clone(),
             triggered_at: env.ledger().timestamp(),
             supporting_data,
-            status: AlertStatus::New as u8,
+            status: AlertStatus::New as u32,
             resolution_notes: Bytes::new(env),
         })
     }
@@ -167,11 +165,11 @@ impl RulesEngine {
     ) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, rule_id.as_ref()));
-        input.append(&Bytes::from_slice(env, institution.to_xdr().as_ref()));
+        input.append(&rule_id.to_bytes());
+        input.append(&institution.to_xdr(env));
         input.append(&Bytes::from_slice(env, &env.ledger().timestamp().to_le_bytes()));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Update rule condition (for dynamic rules)
@@ -209,7 +207,7 @@ impl RulesEngine {
 
         Ok(RuleSet {
             ruleset_id,
-            framework: framework as u8,
+            framework: framework as u32,
             rules: Vec::new(env),
             version: 1,
             is_active: true,
@@ -222,13 +220,10 @@ impl RulesEngine {
     pub fn compute_ruleset_id(env: &Env, framework: RegulatoryFramework) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(
-            env,
-            framework.as_symbol().to_string().as_bytes(),
-        ));
+        input.append(&Bytes::from_slice(env, framework.code().as_bytes()));
         input.append(&Bytes::from_slice(env, b"RULESET"));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Add rule to set
@@ -303,7 +298,7 @@ impl RulesEngine {
             }
 
             // Evaluate rule
-            if let Ok(eval) = Self::evaluate_rule(env, rule, context.clone()) {
+            if let Ok(eval) = Self::evaluate_rule(env, &rule, context.clone()) {
                 evaluations.push_back(eval);
             }
         }
@@ -427,7 +422,7 @@ mod tests {
                 .unwrap();
 
         assert_eq!(alert.severity, 8);
-        assert_eq!(alert.status, AlertStatus::New as u8);
+        assert_eq!(alert.status, AlertStatus::New as u32);
     }
 
     #[test]

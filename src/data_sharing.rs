@@ -220,8 +220,8 @@ pub struct DSAHelper;
 impl DSAHelper {
     /// Calculate the DSA ID as a hash of the agreement components
     pub fn calculate_agreement_id(
-        data_provider: &Address,
-        regulator: &Address,
+        _data_provider: &Address,
+        _regulator: &Address,
         timestamp: u64,
     ) -> BytesN<32> {
         // In production, use env.crypto_sha256() to hash the agreement data

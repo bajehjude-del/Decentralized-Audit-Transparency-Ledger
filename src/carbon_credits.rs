@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use soroban_sdk::{contracterror, contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, Address, Bytes, BytesN, Env, String, Symbol, Vec};
 
 /// Carbon credit tracking error types
 #[contracterror]
@@ -157,7 +157,7 @@ pub struct CarbonCredit {
     pub status: CreditStatus,               // Current status
     pub creation_date: u64,                 // When created
     pub retirement_date: Option<u64>,       // When retired (if applicable)
-    pub tokenization: Option<Tokenization>, // Tokenization info
+    pub tokenization: Tokenization, // Tokenization record (sentinel = not tokenized)
     pub registry: RegistryEntry,            // Registry information
     pub verification_records: Vec<VerificationRecord>, // Audit trail
     pub version: u32,                       // Version number
@@ -232,14 +232,16 @@ pub fn issue_carbon_credit(
     renewable_source: RenewableEnergySource,
     offset: Offset,
     registry: RegistryEntry,
-    standard: ComplianceStandard,
+    _standard: ComplianceStandard,
 ) -> BytesN<32> {
     issuer.require_auth();
 
-    let credit_id = env.crypto().sha256(&Bytes::from_slice(
-        env,
-        format!("{}{}{}", carbon_tonnes, issuer.to_string(), env.ledger().timestamp()).as_bytes(),
-    ));
+    // Deterministic binary preimage (strkey bytes + LE numerics): `format!` and
+    // `Display for soroban_sdk::String` are unavailable in the wasm contract build.
+    let mut credit_preimage = Bytes::from_slice(env, &carbon_tonnes.to_le_bytes());
+    credit_preimage.append(&issuer.to_string().to_bytes());
+    credit_preimage.extend_from_slice(&env.ledger().timestamp().to_le_bytes());
+    let credit_id = env.crypto().sha256(&credit_preimage).to_bytes();
 
     let credit = CarbonCredit {
         credit_id: credit_id.clone(),
@@ -250,7 +252,14 @@ pub fn issue_carbon_credit(
         status: CreditStatus::Issued,
         creation_date: env.ledger().timestamp(),
         retirement_date: None,
-        tokenization: None,
+        tokenization: Tokenization {
+            token_id: BytesN::from_array(&env, &[0u8; 32]),
+            total_tokens: 0,
+            tokens_retired: 0,
+            token_owner: Address::from_string(&String::from_str(&env, crate::NULL_ACCOUNT)),
+            market_value: 0,
+            tradeable: false,
+        },
         registry,
         verification_records: Vec::new(env),
         version: 1,
@@ -307,7 +316,7 @@ pub fn verify_renewable_energy(
 
     // Create verification record
     let verification = VerificationRecord {
-        verification_id: env.crypto().sha256(&Bytes::from_slice(&env, b"VERIFY")),
+        verification_id: env.crypto().sha256(&Bytes::from_slice(&env, b"VERIFY")).to_bytes(),
         auditor: verifier,
         audit_date: env.ledger().timestamp(),
         verified_amount: credit.carbon_tonnes,
@@ -327,7 +336,7 @@ pub fn verify_renewable_energy(
 }
 
 /// Calculate carbon offset based on renewable energy
-pub fn calculate_offset(env: &Env, energy_mwh: u32) -> u32 {
+pub fn calculate_offset(_env: &Env, energy_mwh: u32) -> u32 {
     // Typical calculation: 1 MWh ≈ 0.5 tonnes CO2e offset
     (energy_mwh / 2) as u32
 }
@@ -348,10 +357,10 @@ pub fn tokenize_credit(
         .get(&CarbonCreditKey::CarbonCredit(credit_id.clone()))
         .unwrap_or_else(|| panic!("Credit not found"));
 
-    let token_id = env.crypto().sha256(&Bytes::from_slice(
-        env,
-        format!("TOKEN{}{}", token_owner.to_string(), env.ledger().timestamp()).as_bytes(),
-    ));
+    let mut token_preimage = Bytes::from_slice(env, b"TOKEN");
+    token_preimage.append(&token_owner.to_string().to_bytes());
+    token_preimage.extend_from_slice(&env.ledger().timestamp().to_le_bytes());
+    let token_id = env.crypto().sha256(&token_preimage).to_bytes();
 
     let tokenization = Tokenization {
         token_id: token_id.clone(),
@@ -362,12 +371,12 @@ pub fn tokenize_credit(
         tradeable: true,
     };
 
-    credit.tokenization = Some(tokenization);
+    credit.tokenization = tokenization;
     credit.version += 1;
 
     env.storage()
         .persistent()
-        .set(&CarbonCreditKey::CarbonCredit(credit_id), &credit);
+        .set(&CarbonCreditKey::CarbonCredit(credit_id.clone()), &credit);
 
     env.storage()
         .persistent()
@@ -377,7 +386,7 @@ pub fn tokenize_credit(
 }
 
 /// Retire a carbon credit
-pub fn retire_credit(env: &Env, credit_id: BytesN<32>, retire_reason: Bytes) -> bool {
+pub fn retire_credit(env: &Env, credit_id: BytesN<32>, _retire_reason: Bytes) -> bool {
     let mut credit: CarbonCredit = env
         .storage()
         .persistent()
@@ -452,9 +461,8 @@ pub fn transfer_credit(
     }
 
     // Update tokenization owner if applicable
-    if let Some(mut tokenization) = credit.tokenization {
-        tokenization.token_owner = to.clone();
-        credit.tokenization = Some(tokenization);
+    if credit.tokenization.token_id != BytesN::from_array(&env, &[0u8; 32]) {
+        credit.tokenization.token_owner = to.clone();
     }
 
     env.storage()
@@ -477,7 +485,7 @@ pub fn transfer_credit(
 
 /// Verify sustainability claim
 pub fn verify_sustainability_claim(
-    env: &Env,
+    _env: &Env,
     claim: SustainabilityClaim,
     verifier: Address,
 ) -> bool {
@@ -524,7 +532,7 @@ pub fn audit_renewable_usage(
     }
 
     let record = VerificationRecord {
-        verification_id: env.crypto().sha256(&Bytes::from_slice(&env, b"AUDIT")),
+        verification_id: env.crypto().sha256(&Bytes::from_slice(&env, b"AUDIT")).to_bytes(),
         auditor,
         audit_date: env.ledger().timestamp(),
         verified_amount: credit.carbon_tonnes,
@@ -749,7 +757,7 @@ pub fn get_portfolio_status(
 
 /// Validate sustainability claim
 pub fn validate_claim(
-    env: &Env,
+    _env: &Env,
     claim: SustainabilityClaim,
 ) -> bool {
     // Check claim has description
@@ -864,3 +872,4 @@ pub fn get_total_credits_issued(env: &Env) -> u32 {
         .get(&CarbonCreditKey::CreditCounter)
         .unwrap_or(0)
 }
+

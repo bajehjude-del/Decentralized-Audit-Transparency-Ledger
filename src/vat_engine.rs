@@ -115,7 +115,7 @@ impl VATDeterminationEngine {
     }
 
     /// Get US sales tax rate (simplified - varies by state)
-    fn get_us_rate(transaction: &VATTransaction) -> u32 {
+    fn get_us_rate(_transaction: &VATTransaction) -> u32 {
         // US uses sales tax, not VAT - simplified to 0% for demo
         // In reality, would vary by state: 5-10% range
         0
@@ -188,6 +188,19 @@ impl VATDeterminationEngine {
             VATSupplyType::Construction => 1000,
             VATSupplyType::Transportation => 1000,
             VATSupplyType::Telecommunications => 1000,
+        }
+    }
+
+    /// Get Switzerland VAT rate (standard rate 8.1%)
+    fn get_ch_rate(transaction: &VATTransaction) -> u32 {
+        match transaction.supply_type {
+            VATSupplyType::Goods => 810,
+            VATSupplyType::Services => 810,
+            VATSupplyType::DigitalServices => 810,
+            VATSupplyType::Intangibles => 810,
+            VATSupplyType::Construction => 810,
+            VATSupplyType::Transportation => 810,
+            VATSupplyType::Telecommunications => 810,
         }
     }
 
@@ -268,19 +281,19 @@ impl VATDeterminationEngine {
         };
 
         VATDetermination {
-            transaction_id: transaction.id,
+            transaction_id: transaction.id.clone(),
             vat_rate,
             is_exempt,
             exemption_reason: if is_exempt {
-                Some(transaction.exemption_reason)
+                transaction.exemption_reason
             } else {
-                None
+                VATExemptionReason::None
             },
             reverse_charge_applicable: reverse_charge,
             place_of_supply: transaction.place_of_supply,
             vat_amount,
             determined_at: env.ledger().timestamp(),
-            source: soroban_sdk::Bytes::new(env).try_extend_from_slice(b"VAT_ENGINE_V1").unwrap(),
+            source: soroban_sdk::Bytes::from_slice(env, b"VAT_ENGINE_V1"),
         }
     }
 
@@ -326,7 +339,7 @@ mod tests {
     fn test_eu_goods_b2b_zero_rated() {
         // Intra-EU B2B goods supply should be zero-rated
         let rate = VATDeterminationEngine::get_eu_rate(&VATTransaction {
-            id: soroban_sdk::BytesN::from_array([0u8; 32]),
+            id: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
             supplier: soroban_sdk::Address::random(&Env::default()),
             customer: soroban_sdk::Address::random(&Env::default()),
             supply_type: VATSupplyType::Goods,
@@ -349,7 +362,7 @@ mod tests {
     #[test]
     fn test_reverse_charge_b2b_cross_border() {
         let mut transaction = VATTransaction {
-            id: soroban_sdk::BytesN::from_array([0u8; 32]),
+            id: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
             supplier: soroban_sdk::Address::random(&Env::default()),
             customer: soroban_sdk::Address::random(&Env::default()),
             supply_type: VATSupplyType::Services,

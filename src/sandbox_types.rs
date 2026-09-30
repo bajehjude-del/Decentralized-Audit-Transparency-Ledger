@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Symbol, Vec};
+use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, contracttype};
 
 /// Sandbox environment types for regulatory testing.
 #[contracttype]
@@ -16,11 +16,11 @@ pub enum SandboxEnvironment {
 }
 
 impl SandboxEnvironment {
-    pub fn as_symbol(&self) -> Symbol {
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
         match self {
-            SandboxEnvironment::Level1PoC => Symbol::new(&[b"LEVEL1"]),
-            SandboxEnvironment::Level2Beta => Symbol::new(&[b"LEVEL2"]),
-            SandboxEnvironment::Level3Production => Symbol::new(&[b"LEVEL3"]),
+            SandboxEnvironment::Level1PoC => Symbol::new(env, "LEVEL1"),
+            SandboxEnvironment::Level2Beta => Symbol::new(env, "LEVEL2"),
+            SandboxEnvironment::Level3Production => Symbol::new(env, "LEVEL3"),
         }
     }
 
@@ -85,14 +85,14 @@ pub enum ParticipantType {
 }
 
 impl ParticipantType {
-    pub fn as_symbol(&self) -> Symbol {
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
         match self {
-            ParticipantType::Fintech => Symbol::new(&[b"FINTECH"]),
-            ParticipantType::Bank => Symbol::new(&[b"BANK"]),
-            ParticipantType::PaymentProvider => Symbol::new(&[b"PAYMENT"]),
-            ParticipantType::TechProvider => Symbol::new(&[b"TECH"]),
-            ParticipantType::CryptoCompany => Symbol::new(&[b"CRYPTO"]),
-            ParticipantType::Cooperative => Symbol::new(&[b"COOP"]),
+            ParticipantType::Fintech => Symbol::new(env, "FINTECH"),
+            ParticipantType::Bank => Symbol::new(env, "BANK"),
+            ParticipantType::PaymentProvider => Symbol::new(env, "PAYMENT"),
+            ParticipantType::TechProvider => Symbol::new(env, "TECH"),
+            ParticipantType::CryptoCompany => Symbol::new(env, "CRYPTO"),
+            ParticipantType::Cooperative => Symbol::new(env, "COOP"),
         }
     }
 }
@@ -142,9 +142,9 @@ pub struct SandboxParticipant {
     /// Organization address (contract or account)
     pub address: Address,
     /// Participant type
-    pub participant_type: u8, // ParticipantType as u8
+    pub participant_type: u32, // ParticipantType as u8
     /// Sandbox environment level
-    pub environment: u8, // SandboxEnvironment as u8
+    pub environment: u32, // SandboxEnvironment as u8
     /// Entry timestamp
     pub entry_date: u64,
     /// Planned exit date
@@ -168,11 +168,11 @@ pub struct SandboxApplication {
     /// Organization name
     pub organization_name: Bytes,
     /// Participant type
-    pub participant_type: u8, // ParticipantType as u8
+    pub participant_type: u32, // ParticipantType as u8
     /// Requested environment level
-    pub requested_environment: u8, // SandboxEnvironment as u8
+    pub requested_environment: u32, // SandboxEnvironment as u8
     /// Application status
-    pub status: u8, // ApplicationStatus as u8
+    pub status: u32, // ApplicationStatus as u8
     /// Submitted timestamp
     pub submitted_at: u64,
     /// Reviewed timestamp

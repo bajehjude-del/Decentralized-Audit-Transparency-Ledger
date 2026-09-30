@@ -1,7 +1,6 @@
 #![no_std]
 
-use crate::sandbox_types::*;
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Vec};
 
 /// Sandbox supervision record.
 #[contracttype]
@@ -20,7 +19,7 @@ pub struct SupervisionRecord {
     /// Overall assessment (0-100)
     pub assessment_score: u32,
     /// Risk level (low/medium/high)
-    pub risk_level: u8,
+    pub risk_level: u32,
     /// Corrective actions needed
     pub corrective_actions: Bytes,
 }
@@ -68,7 +67,7 @@ impl SupervisionManager {
             inspection_date: env.ledger().timestamp(),
             findings,
             assessment_score,
-            risk_level: risk_level as u8,
+            risk_level: risk_level as u32,
             corrective_actions: Bytes::new(env),
         })
     }
@@ -77,10 +76,10 @@ impl SupervisionManager {
     pub fn compute_record_id(env: &Env, participant_id: &BytesN<32>) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, participant_id.as_ref()));
+        input.append(&participant_id.to_bytes());
         input.append(&Bytes::from_slice(env, &env.ledger().timestamp().to_le_bytes()));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Add corrective actions
@@ -99,10 +98,10 @@ impl SupervisionManager {
     /// Check if regular monitoring required
     pub fn requires_regular_monitoring(record: &SupervisionRecord) -> bool {
         let risk = match record.risk_level {
-            r if r == RiskLevel::Low as u8 => RiskLevel::Low,
-            r if r == RiskLevel::Medium as u8 => RiskLevel::Medium,
-            r if r == RiskLevel::High as u8 => RiskLevel::High,
-            r if r == RiskLevel::Critical as u8 => RiskLevel::Critical,
+            r if r == RiskLevel::Low as u32 => RiskLevel::Low,
+            r if r == RiskLevel::Medium as u32 => RiskLevel::Medium,
+            r if r == RiskLevel::High as u32 => RiskLevel::High,
+            r if r == RiskLevel::Critical as u32 => RiskLevel::Critical,
             _ => RiskLevel::Low,
         };
 
@@ -148,7 +147,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(record.assessment_score, 85);
-        assert_eq!(record.risk_level, RiskLevel::Low as u8);
+        assert_eq!(record.risk_level, RiskLevel::Low as u32);
     }
 
     #[test]

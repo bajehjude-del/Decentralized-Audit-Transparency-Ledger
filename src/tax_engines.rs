@@ -3,7 +3,7 @@
 //! Transfer Pricing Engine
 //! Country-by-Country Reporting (CbCR) Engine
 
-use soroban_sdk::{contracttype, Env, Vec, Address};
+use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, Vec};
 use crate::tax::*;
 
 // ========== DIGITAL SERVICES TAX ENGINE ==========
@@ -13,7 +13,7 @@ pub struct DSTEngine;
 impl DSTEngine {
     /// Check if DST applies to a transaction
     pub fn is_applicable(
-        env: &Env,
+        _env: &Env,
         transaction: &DSTTransaction,
     ) -> bool {
         // DST applies to digital service companies with revenue > threshold
@@ -78,14 +78,12 @@ impl DSTEngine {
         };
 
         DSTDetermination {
-            transaction_id: transaction.id,
+            transaction_id: transaction.id.clone(),
             is_applicable,
             dst_rate,
             jurisdictions,
             dst_amount,
-            basis: soroban_sdk::Bytes::new(env)
-                .try_extend_from_slice(b"DST_ENGINE_V1")
-                .unwrap(),
+            basis: soroban_sdk::Bytes::from_slice(env, b"DST_ENGINE_V1"),
             determined_at: env.ledger().timestamp(),
         }
     }
@@ -98,6 +96,7 @@ pub struct CryptoReportingEngine;
 impl CryptoReportingEngine {
     /// Determine CARF/DAC8 reporting requirements
     pub fn is_reportable(
+        env: &Env,
         holding: &CryptoHolding,
         transaction: &CryptoTransaction,
     ) -> bool {
@@ -107,9 +106,14 @@ impl CryptoReportingEngine {
         // - Cross-border transfers
         // - Staking rewards
 
+        // `Symbol::to_string` is host-only; compare against contract-side symbols.
+        let sell = Symbol::new(env, "sell");
+        let transfer = Symbol::new(env, "transfer");
+        let stake_reward = Symbol::new(env, "stake_reward");
+        let large_holding = Symbol::new(env, "large_holding");
         matches!(
-            transaction.transaction_type.to_string(),
-            s if s == "sell" || s == "transfer" || s == "stake_reward" || s == "large_holding"
+            transaction.transaction_type.clone(),
+            s if s == sell || s == transfer || s == stake_reward || s == large_holding
         )
     }
 
@@ -172,7 +176,7 @@ impl CryptoReportingEngine {
         }
 
         CARFReportingRecord {
-            id: soroban_sdk::BytesN::from_array([0u8; 32]),
+            id: soroban_sdk::BytesN::from_array(env, &[0u8; 32]),
             reporting_entity,
             account_holder: None,
             reporting_year,
@@ -192,6 +196,7 @@ pub struct TransferPricingEngine;
 impl TransferPricingEngine {
     /// Validate transfer price using arm's length principle
     pub fn validate_price(
+        env: &Env,
         transaction_price: u64,
         comparable_prices: &Vec<u64>,
     ) -> TransferPricingAnalysis {
@@ -212,8 +217,8 @@ impl TransferPricingEngine {
         let defensible = variance_percentage <= 2500;
 
         TransferPricingAnalysis {
-            id: soroban_sdk::BytesN::from_array([0u8; 32]),
-            doc_id: soroban_sdk::BytesN::from_array([0u8; 32]),
+            id: soroban_sdk::BytesN::from_array(env, &[0u8; 32]),
+            doc_id: soroban_sdk::BytesN::from_array(env, &[0u8; 32]),
             arms_length_price: avg_comparable,
             transfer_price: transaction_price,
             variance,
@@ -227,7 +232,7 @@ impl TransferPricingEngine {
     /// Determine appropriate transfer pricing method
     pub fn select_method(
         supply_type: &str,
-        transaction_type: &str,
+        _transaction_type: &str,
     ) -> TransferPricingMethod {
         if supply_type.contains("goods") {
             TransferPricingMethod::CUP
@@ -267,7 +272,7 @@ impl CbCREngine {
             tangible_assets: 2_000_000,
             entities: {
                 let mut v = Vec::new(env);
-                v.push_back(soroban_sdk::Bytes::new(env).try_extend_from_slice(b"EU Subsidiary").unwrap());
+                v.push_back(soroban_sdk::Bytes::from_slice(env, b"EU Subsidiary"));
                 v
             },
         });
@@ -293,7 +298,7 @@ impl CbCREngine {
         }
 
         CbCReport {
-            id: soroban_sdk::BytesN::from_array([0u8; 32]),
+            id: soroban_sdk::BytesN::from_array(env, &[0u8; 32]),
             reporting_entity,
             fiscal_year,
             jurisdictions,
@@ -301,9 +306,7 @@ impl CbCREngine {
             total_profit,
             total_tax_paid: total_tax,
             generated_date: env.ledger().timestamp(),
-            reporting_standard: soroban_sdk::Bytes::new(env)
-                .try_extend_from_slice(b"BEPS_Action13")
-                .unwrap(),
+            reporting_standard: soroban_sdk::Bytes::from_slice(env, b"BEPS_Action13"),
             filing_status: 0, // Draft
         }
     }
@@ -339,14 +342,14 @@ mod tests {
     #[test]
     fn test_transfer_pricing_defensible() {
         let comparable = vec![100_000, 105_000, 95_000];
-        let analysis = TransferPricingEngine::validate_price(100_000, &comparable);
+        let analysis = TransferPricingEngine::validate_price(&env, 100_000, &comparable);
         assert!(analysis.defensible);
     }
 
     #[test]
     fn test_transfer_pricing_not_defensible() {
         let comparable = vec![100_000, 105_000, 95_000];
-        let analysis = TransferPricingEngine::validate_price(150_000, &comparable);
+        let analysis = TransferPricingEngine::validate_price(&env, 150_000, &comparable);
         assert!(!analysis.defensible);
     }
 }

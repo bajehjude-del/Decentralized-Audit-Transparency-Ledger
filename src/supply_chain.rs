@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use alloc::string::String;
+use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contracterror, contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
 
 /// Supply chain specific error types
@@ -171,7 +171,7 @@ pub struct SupplyChainVerification {
 pub struct TimelineEntry {
     pub timestamp: u64,         // When this event occurred
     pub entry_type: Symbol,     // Type: origin, custody, certification, etc.
-    pub location: Option<Location>, // Where event occurred
+    pub location: Location, // Where event occurred
     pub description: Bytes,     // Human-readable description
     pub verified: bool,         // Whether verified on-chain
     pub event_id: BytesN<32>,   // Link to on-chain event
@@ -359,7 +359,7 @@ pub fn log_custody_transfer(
     let mut provenance: Provenance = env
         .storage()
         .persistent()
-        .get(&SupplyChainDataKey::ProvenanceEvent(event_id))
+        .get(&SupplyChainDataKey::ProvenanceEvent(event_id.clone()))
         .unwrap_or_else(|| {
             panic!("Provenance event not found");
         });
@@ -404,7 +404,7 @@ pub fn log_certification(
         audit_trail: Vec::new(&env),
     };
 
-    let cert_event_id = env.crypto().sha256(&certification.cert_id);
+    let cert_event_id = env.crypto().sha256(&certification.cert_id).to_bytes();
     env.storage()
         .persistent()
         .set(&SupplyChainDataKey::CertificationEvent(cert_event_id), &certification);
@@ -439,7 +439,7 @@ pub fn log_labor_conditions(
         certifications: Vec::new(&env),
     };
 
-    let report_id = env.crypto().sha256(&facility_id);
+    let report_id = env.crypto().sha256(&facility_id).to_bytes();
     env.storage()
         .persistent()
         .set(&SupplyChainDataKey::LaborReport(report_id), &labor_report);
@@ -473,7 +473,7 @@ pub fn log_environmental_impact(
         report_hash,
     };
 
-    let report_id = env.crypto().sha256(&facility_id);
+    let report_id = env.crypto().sha256(&facility_id).to_bytes();
     env.storage()
         .persistent()
         .set(&SupplyChainDataKey::EnvironmentalReport(report_id), &environmental);
@@ -497,12 +497,12 @@ pub fn verify_product_chain(
     let mut provenance_verified = false;
     let mut certifications_valid = false;
     let mut labor_compliant = true;
-    let mut environmental_standards_met = true;
+    let environmental_standards_met = true;
     let mut issues: Vec<Bytes> = Vec::new(&env);
     let mut verification_score: u32 = 0;
 
     // Check provenance
-    if !product.provenance_id.is_zero() {
+    if product.provenance_id != BytesN::from_array(env, &[0u8; 32]) {
         if let Some(prov) = env
             .storage()
             .persistent()
@@ -591,12 +591,12 @@ pub fn get_product_timeline(env: &Env, event_ids: Vec<BytesN<32>>) -> Vec<Timeli
         if let Some(prov) = env
             .storage()
             .persistent()
-            .get::<_, Provenance>(&SupplyChainDataKey::ProvenanceEvent(event_id))
+            .get::<_, Provenance>(&SupplyChainDataKey::ProvenanceEvent(event_id.clone()))
         {
             timeline.push_back(TimelineEntry {
                 timestamp: prov.timestamp,
                 entry_type: Symbol::new(&env, "origin"),
-                location: Some(prov.origin_location),
+                location: prov.origin_location,
                 description: Bytes::from_slice(&env, b"Product origin recorded"),
                 verified: prov.is_verified,
                 event_id,
@@ -639,7 +639,7 @@ pub fn verify_certification(
     env: &Env,
     cert_id: Bytes,
 ) -> bool {
-    let cert_event_id = env.crypto().sha256(&cert_id);
+    let cert_event_id = env.crypto().sha256(&cert_id).to_bytes();
 
     if let Some(cert) = env
         .storage()
@@ -663,13 +663,14 @@ pub fn generate_qr_code_url(
     sku: Bytes,
     base_url: Bytes,
 ) -> Bytes {
-    let url_str = format!(
-        "{}?brand={}&sku=",
-        String::from_utf8(base_url.to_vec()).unwrap_or_default(),
-        String::from_utf8(brand_id.to_string().as_bytes().to_vec()).unwrap_or_default()
-    );
-
-    Bytes::from_slice(&env, url_str.as_bytes())
+    // Built by concatenation: `Symbol::to_string` is host-only and `Bytes` has no
+    // `as_slice` in SDK 27.
+    let mut url = base_url;
+    url.extend_from_slice(b"?brand=");
+    url.append(&brand_id.to_xdr(env));
+    url.extend_from_slice(b"&sku=");
+    url.append(&sku);
+    url
 }
 
 /// Generate a cryptographic proof of supply chain integrity
@@ -677,9 +678,10 @@ pub fn generate_integrity_proof(
     env: &Env,
     event_ids: Vec<BytesN<32>>,
 ) -> BytesN<32> {
-    let mut data = vec![];
+    let mut data = Bytes::new(env);
     for event_id in event_ids.iter() {
-        data.extend_from_slice(&event_id.to_vec());
+        data.append(&event_id.to_bytes());
     }
-    env.crypto().sha256(&Bytes::from_slice(&env, &data))
+    env.crypto().sha256(&data).to_bytes()
 }
+

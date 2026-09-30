@@ -2,6 +2,8 @@
 
 Procedures for backing up, restoring, and maintaining the availability of the AuditLedger system. This document covers the on-chain contract state, off-chain services, and the tooling that connects them.
 
+For the GitOps deployment workflow that manages the off-chain services described here, see [docs/gitops-workflow.md](gitops-workflow.md). All Kubernetes deployments are reconciled from Git via ArgoCD, so recovering a service is a matter of restoring the desired state in the GitOps repository and letting the controller reconcile it.
+
 ---
 
 ## Overview
@@ -12,8 +14,11 @@ AuditLedger has two distinct recovery domains:
 |--------|---------------|--------------|
 | **On-chain state** | Contract event log, configuration, ownership | Accidental contract upgrade/migration to new ID, loss of owner key, chain-level incident |
 | **Off-chain services** | REST/GraphQL APIs, WebSocket stream, metrics exporter, bridge relayer, UI, Prometheus/Grafana | Host failure, bad deployment, Docker volume loss |
+| **GitOps state** | Kubernetes manifests, Helm charts, Kustomize overlays, ArgoCD Applications | Drift from desired state, bad image promotion, lost cluster |
 
 Because the Stellar ledger is itself a distributed, replicated database, on-chain event data is never truly "lost" as long as the chain is live. The goal of on-chain backup is to maintain a portable, verifiable snapshot that can be replayed onto a replacement contract if the original contract ID becomes unusable.
+
+> **Note:** The Docker Compose procedures below remain valid for local development and single-host deployments. Production deployments are managed by ArgoCD from the `gitops/` repository; see [docs/gitops-workflow.md](gitops-workflow.md) for the reconciliation, promotion, and rollback workflow.
 
 ---
 
@@ -30,6 +35,8 @@ Because the Stellar ledger is itself a distributed, replicated database, on-chai
 | Grafana dashboards | `monitoring/grafana/dashboards/` | git / volume backup |
 | Prometheus data | Docker volume `prometheus_data` | volume snapshot |
 | Docker Compose configuration | `docker-compose.yml` | git |
+| GitOps repository (manifests, charts, overlays) | `gitops/` | git |
+| ArgoCD Application definitions | `gitops/apps/` | git |
 
 ### 1.2 Event snapshot backup
 
@@ -79,6 +86,7 @@ The output JSON follows this structure:
 | Weekly | cron every Sunday 03:00 UTC | 1 year |
 | Pre-upgrade | manual, before any `upgrade_contract` call | indefinitely |
 | Pre-migration | manual, before deploying a replacement contract | indefinitely |
+| Pre-image-promotion | automated, before each GitOps promotion | 90 days |
 
 Automate daily backups with a cron entry on the backup host:
 
@@ -92,6 +100,8 @@ Automate daily backups with a cron entry on the backup host:
 ### 1.4 Off-chain service backup
 
 Grafana dashboards and Prometheus rules are version-controlled under `monitoring/`. No special backup step is needed beyond keeping the repository up to date.
+
+All Kubernetes manifests, Helm charts, and Kustomize overlays are version-controlled under `gitops/`. Because ArgoCD reconciles the cluster from this repository, the Git history itself is the audit trail and the backup for deployment configuration. Ensure the `gitops/` repository is mirrored to a second remote (e.g., a self-hosted Git server) so a loss of the primary Git host does not block recovery.
 
 For Prometheus historical metric data (Docker volume):
 
@@ -253,6 +263,8 @@ If the owner key is lost entirely (no backup), the contract governance functions
 
 All off-chain services run as Docker containers defined in `docker-compose.yml`. On a new host:
 
+For Kubernetes deployments managed by ArgoCD, a host failure is handled by the cluster itself: the ReplicaSet controller reschedules pods onto healthy nodes. If the entire cluster is lost, re-create it and point ArgoCD at the `gitops/` repository; the controller will restore every service to the desired state recorded in Git. See [docs/gitops-workflow.md](gitops-workflow.md#disaster-recovery) for the full cluster-rebuild procedure.
+
 1. Install prerequisites: Docker, Docker Compose, Node.js 20+.
 2. Clone the repository and copy secrets:
 
@@ -337,6 +349,8 @@ docker compose run -d --name relayer-standby relayer
 ### 3.4 Multi-region deployment
 
 For production systems requiring high availability across regions, deploy the off-chain stack to at least two regions and configure:
+
+When using ArgoCD, register each regional cluster as a separate ArgoCD cluster and use ApplicationSets to fan out the same `gitops/` manifests to every region. Progressive delivery (canary or blue-green) is configured per Application via Argo Rollouts; see [docs/gitops-workflow.md](gitops-workflow.md#progressive-delivery).
 
 - A global load balancer (e.g., AWS Route 53 + ALB, Cloudflare) with health-check-based failover.
 - Shared secrets stored in a replicated secrets manager (e.g., AWS Secrets Manager with cross-region replication).
@@ -505,8 +519,161 @@ soroban contract invoke \
 | RPC failover test | Quarterly | Platform team |
 | Off-chain service recovery | Quarterly | Platform team |
 | Owner key rotation drill | Annually | Security team |
+| GitOps rollback drill (revert a bad promotion) | Quarterly | Platform team |
+| ArgoCD sync/health verification | Daily (automated) | On-call engineer |
 
 Record the results of each drill in your incident log. If a test fails, file a bug and re-run after the fix before closing the issue.
+
+---
+
+## 5. Comprehensive Disaster Recovery Runbooks
+
+The AuditLedger system provides standardized, auditable operational runbooks under `runbooks/definitions/` and executable via `scripts/runbook-runner.sh`.
+
+### 5.1 RB-005: Contract Upgrade Failure Rollback
+
+- **Trigger**: Transaction reverts, unexpected panics, or broken invariants immediately following contract WASM upgrade.
+- **Preconditions**: Previous stable WASM hash recorded in release catalog.
+- **Execution**:
+  ```bash
+  ./scripts/runbook-runner.sh execute contract-upgrade-failure '{"contractAddress": "CCXMTP7..."}'
+  ```
+- **Step-by-step Procedures**:
+  1. **Freeze Contract Ingestion**: Invoke `pause_with_details` to block write operations while preserving read access.
+  2. **Storage Layout Validation**: Run `scripts/storage-layout/validate_layout.py` to assert that storage keys were not corrupted.
+  3. **WASM Bytecode Rollback**: Invoke `upgrade_contract` passing the previous stable WASM bytecode hash.
+  4. **Smoke Diagnostics**: Execute contract test suite verifying event logging and query resolution.
+  5. **Unpause & Publish**: Unpause the contract and emit a recovery audit event to notification subscribers.
+
+### 5.2 RB-006: RPC Endpoint Outage & Failover
+
+- **Trigger**: Primary Stellar/Soroban RPC endpoint returns HTTP 5xx or response latency exceeds 3000ms across 3 consecutive probes.
+- **Preconditions**: Standby RPC cluster synchronized within 1 ledger.
+- **Execution**:
+  ```bash
+  ./scripts/runbook-runner.sh execute rpc-outage
+  ```
+- **Step-by-step Procedures**:
+  1. **Health Verification**: Active probe confirms primary RPC latency degradation or down state.
+  2. **Trip Circuit Breaker**: Client and API connection pools open circuit breakers to prevent cascading timeouts.
+  3. **Promote Standby Endpoint**: Update DNS / load balancer target to `rpc-secondary.stellar.org`.
+  4. **Ledger Sequence Catchup**: Assert standby RPC returns `latestLedger >= primaryLastKnownLedger`.
+  5. **Connection Pool Reset**: Re-initialize SDK and backend connection pools and reset circuit breaker to `CLOSED`.
+
+### 5.3 RB-007: Database Corruption Recovery
+
+- **Trigger**: Database checksum mismatches, WAL corruption, or unrecoverable disk IO errors on off-chain storage replicas.
+- **Preconditions**: Verified S3 backup snapshot available within the past 60 minutes.
+- **Execution**:
+  ```bash
+  ./scripts/runbook-runner.sh execute database-corruption
+  ```
+- **Step-by-step Procedures**:
+  1. **Quarantine Node**: Eject the corrupted replica from the load balancer pool.
+  2. **Fetch Snapshot**: Download the latest immutable point-in-time snapshot from S3.
+  3. **Filesystem Restore**: Verify SHA-256 signature and unpack the snapshot.
+  4. **Delta Replay**: Run `scripts/replay.sh` to ingest delta events from Soroban ledger history up to current head.
+  5. **Integrity Check & Re-admission**: Verify cryptographic hash-chain across all event records and rejoin the active pool.
+
+### 5.4 RB-004: Bridge Relayer Failure & Leader Failover
+
+- **Trigger**: Cross-chain relayer heartbeat missing for > 120 seconds or transaction queue backlog exceeds threshold.
+- **Preconditions**: Secondary relayer synced with EVM / Soroban bridge contracts.
+- **Execution**:
+  ```bash
+  ./scripts/runbook-runner.sh execute bridge-failover
+  ```
+- **Step-by-step Procedures**:
+  1. **Heartbeat Check**: Confirm primary relayer stall and check secondary relayer sync.
+  2. **Fencing Lock**: Acquire distributed lock fence preventing split-brain transaction submissions.
+  3. **Queue Reconciliation**: Transfer uncommitted in-flight event batches to the backup relayer queue.
+  4. **Promote Standby**: Invoke on-chain bridge contract to register the standby relayer address.
+  5. **State Root Attestation**: Verify cross-chain Merkle root attestation matches on target network.
+
+### 5.5 RB-008: Monitoring Stack Outage Recovery
+
+- **Trigger**: Prometheus scrape failures for > 5 intervals, Grafana dashboard unavailability, or Alertmanager crash.
+- **Preconditions**: Standby monitoring instance or disk spooling capability ready.
+- **Execution**:
+  ```bash
+  ./scripts/runbook-runner.sh execute monitoring-stack-outage
+  ```
+- **Step-by-step Procedures**:
+  1. **Diagnose Pipeline**: Check container status for Prometheus, Grafana, and Metrics Exporter.
+  2. **Activate Disk Spooling**: Metrics exporter switches to local disk buffer to prevent telemetry drop.
+  3. **Failover Alertmanager**: Route alerts to secondary Alertmanager replica.
+  4. **Restart Prometheus**: Recreate Prometheus StatefulSet with clean WAL recovery.
+  5. **Drain Spool Buffer**: Flush buffered telemetry into Prometheus and verify nominal metric flow.
+
+---
+
+## 6. Automated Failover Architecture
+
+Automated failover controllers in `tools/failover/automated-failover.ts` and `scripts/automated-failover.sh` monitor infrastructure and switch targets without manual human intervention:
+
+- **RPC Endpoint Failover**: Implements three-state circuit breakers (`CLOSED`, `OPEN`, `HALF_OPEN`) with active HTTP probing. When error rates exceed threshold, traffic switches seamlessly to secondary RPC clusters.
+- **API Multi-Region Failover**: In the event of an AWS / GCP regional outage, DNS health routing automatically shifts traffic between `us-east-1` and `eu-central-1`.
+- **Metrics Exporter Buffer Spooling**: When Prometheus is unreachable, metrics are spooled to local memory and disk buffers up to 1GB, guaranteeing zero telemetry loss during monitoring outages.
+
+---
+
+## 7. Chaos Engineering Experiments
+
+Chaos experiments test system resilience under controlled fault conditions:
+
+- **Litmus Chaos Scenarios**:
+  - `chaos/litmus/rpc-network-latency.yaml`: Injects 4000ms network latency on RPC requests to verify circuit breaker trip and fallback.
+  - `chaos/litmus/api-pod-failure.yaml`: Simulates sudden pod crashes to test Kubernetes ReplicaSet auto-healing and load balancer health draining.
+- **Chaos Mesh Scenarios**:
+  - `chaos/chaos-mesh/rpc-network-partition.yaml`: Partitions RPC network traffic to validate relayer and API failover.
+  - `chaos/chaos-mesh/db-io-delay.yaml`: Simulates disk latency spikes on database volumes to verify query timeout protections.
+
+---
+
+## 8. Scheduled Disaster Recovery Drills
+
+Regular drills ensure teams and automated tooling are ready for production incidents:
+
+| Drill Type | Frequency | Scenario | Success Criteria |
+|------------|-----------|----------|------------------|
+| **WASM Rollback Drill** | Monthly | Revert simulated contract upgrade failure | Complete rollback in < 3 minutes with zero state loss |
+| **RPC Outage Simulation** | Bi-weekly | Inject RPC latency via Litmus Chaos | Failover executes in < 15 seconds without dropped events |
+| **Database Restore Replay** | Monthly | Restore snapshot and replay 10,000 events | Restored state hash matches ledger head exactly |
+| **Bridge Leader Failover** | Quarterly | Kill active bridge relayer process | Standby takes over in < 30 seconds with no nonce collisions |
+
+---
+
+## 9. Runbook Automation (RunWhen & Scripted Execution)
+
+Runbooks can be executed both programmatically and via interactive CLI:
+
+```bash
+# List all operational and DR runbooks
+./scripts/runbook-runner.sh list
+
+# Validate runbook schema and parameters
+./scripts/runbook-runner.sh validate contract-upgrade-failure
+
+# Perform dry-run simulation
+./scripts/runbook-runner.sh dry-run rpc-outage
+
+# Execute live automated remediation
+./scripts/runbook-runner.sh execute rpc-outage
+```
+
+---
+
+## 10. Disaster Recovery Metrics & SLAs
+
+AuditLedger continuously measures disaster recovery readiness using three primary metrics:
+
+| Metric | Target SLA | Description | Measurement Method |
+|--------|------------|-------------|--------------------|
+| **RTO (Recovery Time Objective)** | **< 5 minutes** | Maximum acceptable duration to restore service availability | Timestamp difference from outage detection to health check nominal |
+| **RPO (Recovery Point Objective)** | **0 transactions (on-chain)**<br>**< 60 seconds (off-chain)** | Maximum acceptable data loss window | Delta ledger sequence / missing uncommitted events |
+| **MTTR (Mean Time to Recovery)** | **< 15 minutes** | Average time required to diagnose, remediate, and verify recovery | Measured across all simulated drills and live incidents |
+
+DR metrics are aggregated and exposed through `DRMetricsTracker` in `tools/failover/automated-failover.ts` and Grafana disaster recovery dashboards.
 
 ---
 
@@ -517,3 +684,6 @@ Record the results of each drill in your incident log. If a test fails, file a b
 - [docs/architecture.md](architecture.md) — system component overview
 - [docs/fees.md](fees.md) — storage costs and TTL configuration
 - [tools/backup/README.md](../tools/backup/README.md) — backup script reference
+- [docs/gitops-workflow.md](gitops-workflow.md) — GitOps deployment workflow, progressive delivery, and rollback
+- [gitops/README.md](../gitops/README.md) — GitOps repository structure and Application definitions
+

@@ -8,7 +8,7 @@
 //! - Data sharing agreement management
 //! - Compliance standard validators (ISA 3000, SOC2)
 
-use soroban_sdk::{contracttype, BytesN, Address, Symbol, Bytes, Vec, Env};
+use soroban_sdk::{contracttype, BytesN, Address, Symbol, Bytes, Vec};
 
 /// Compliance audit standards supported by the system
 #[contracttype]
@@ -220,7 +220,7 @@ pub struct RegulatorAuditEntry {
     /// Submitter address
     pub submitter: Address,
     /// Regulatory classification
-    pub regulatory_class: Option<RegulatoryEventClass>,
+    pub regulatory_class: RegulatoryEventClass,
     /// Sensitivity level
     pub sensitivity: SensitivityLevel,
     /// Whether this event demonstrates control effectiveness
@@ -320,3 +320,4 @@ mod tests {
         assert!(SensitivityLevel::Confidential < SensitivityLevel::Restricted);
     }
 }
+

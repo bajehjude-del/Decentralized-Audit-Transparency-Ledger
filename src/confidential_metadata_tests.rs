@@ -1,0 +1,115 @@
+#[cfg(test)]
+mod tests {
+    use super::confidential_metadata::{
+        AccessControlPolicy, ConfidentialError, ConfidentialEventLedger,
+        ConfidentialEventLedgerClient,
+    };
+    use soroban_sdk::{
+        testutils::Address as _, Address, Bytes, BytesN, Env, Symbol, Vec,
+    };
+
+    #[test]
+    fn test_log_and_access_confidential_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(ConfidentialEventLedger, ());
+        let client = ConfidentialEventLedgerClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let submitter = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        let event_type = Symbol::new(&env, "audit_priv");
+        let encrypted_metadata = Bytes::from_slice(&env, b"encrypted_secret_data_payload_123");
+        let zk_proof = Bytes::from_slice(&env, b"valid_zk_snark_proof_commitment_bytes_32");
+        let key_id = BytesN::from_array(&env, &[7u8; 32]);
+
+        let mut allowed = Vec::new(&env);
+        allowed.push_back(recipient.clone());
+        let policy = AccessControlPolicy::CustomAllowlist(allowed);
+
+        let event_id = client.log_confidential_event(
+            &submitter,
+            &event_type,
+            &encrypted_metadata,
+            &policy,
+            &zk_proof,
+            &key_id,
+        );
+
+        // Access check
+        assert!(client.check_access(&event_id, &submitter));
+        assert!(client.check_access(&event_id, &recipient));
+        assert!(!client.check_access(&event_id, &stranger));
+
+        // Decrypt / retrieve payload
+        let decrypted = client.decrypt_event_metadata(&event_id, &recipient);
+        assert_eq!(decrypted, encrypted_metadata);
+    }
+
+    #[test]
+    fn test_key_registration_and_rotation() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(ConfidentialEventLedger, ());
+        let client = ConfidentialEventLedgerClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let user = Address::generate(&env);
+        let pub_key1 = Bytes::from_slice(&env, b"public_key_v1");
+        client.register_encryption_key(&user, &pub_key1);
+
+        let pub_key2 = Bytes::from_slice(&env, b"public_key_v2");
+        client.rotate_encryption_key(&user, &pub_key2);
+
+        client.revoke_encryption_key(&user);
+    }
+
+    #[test]
+    fn test_confidential_analytics_aggregation() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(ConfidentialEventLedger, ());
+        let client = ConfidentialEventLedgerClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let submitter = Address::generate(&env);
+        let event_type = Symbol::new(&env, "audit");
+        let zk_proof = Bytes::from_slice(&env, b"valid_zk_snark_proof_commitment_bytes_32");
+        let key_id = BytesN::from_array(&env, &[1u8; 32]);
+
+        let id1 = client.log_confidential_event(
+            &submitter,
+            &event_type,
+            &Bytes::from_slice(&env, b"chunk_1"),
+            &AccessControlPolicy::Public,
+            &zk_proof,
+            &key_id,
+        );
+        let id2 = client.log_confidential_event(
+            &submitter,
+            &event_type,
+            &Bytes::from_slice(&env, b"chunk_2"),
+            &AccessControlPolicy::Public,
+            &zk_proof,
+            &key_id,
+        );
+
+        let mut list = Vec::new(&env);
+        list.push_back(id1);
+        list.push_back(id2);
+
+        let agg = client.aggregate_confidential_events(&list);
+        assert_eq!(agg.total_events, 2);
+    }
+}

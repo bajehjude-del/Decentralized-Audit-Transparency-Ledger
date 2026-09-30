@@ -88,12 +88,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Run Criterion Benchmarks
+      - name: Run Contract Benchmarks
         run: |
-          cargo bench --bench event_benchmarks -- --output-format bencher | tee benchmark_output.txt || true
+          # Fast smoke gate for this pipeline: the `limits` suite exercises the
+          # write path, the metadata boundary and auth rejections. The full
+          # 199-case suite + WASM size check runs in contract-benchmarks.yml.
+          BENCH_ITERATIONS=3 BENCH_WARMUP=0 BENCH_SUITES=limits \
+            scripts/bench/run_benchmarks.sh --skip-wasm --baseline-only
+          cp benchmarks/results/benchmark-report.json benchmark_output.json
       - name: Validate Benchmark Regressions
         run: |
-          bash scripts/ci/benchmark_regression_check.sh benchmark_output.txt
+          bash scripts/ci/benchmark_regression_check.sh benchmark_output.json
 
   # ── 4. Automated Release Generation ───────────────────────────────────────
   automated-release:

@@ -328,7 +328,7 @@ mod transfer_pricing_tests {
     #[test]
     fn test_transfer_price_defensible_within_range() {
         let comparable = vec![100_000, 105_000, 95_000];
-        let analysis = TransferPricingEngine::validate_price(100_000, &comparable);
+        let analysis = TransferPricingEngine::validate_price(&env, 100_000, &comparable);
         
         assert!(analysis.defensible);
         assert_eq!(analysis.transfer_price, 100_000);
@@ -337,7 +337,7 @@ mod transfer_pricing_tests {
     #[test]
     fn test_transfer_price_defensible_iq_range() {
         let comparable = vec![100_000, 105_000, 95_000];
-        let analysis = TransferPricingEngine::validate_price(120_000, &comparable);
+        let analysis = TransferPricingEngine::validate_price(&env, 120_000, &comparable);
         
         // 120_000 vs avg 100_000 = 20% variance, outside 25% defensible range is still within ±25%
         assert!(analysis.defensible || !analysis.defensible); // Depends on exact comparison logic
@@ -346,7 +346,7 @@ mod transfer_pricing_tests {
     #[test]
     fn test_transfer_price_not_defensible_way_off() {
         let comparable = vec![100_000, 105_000, 95_000];
-        let analysis = TransferPricingEngine::validate_price(200_000, &comparable);
+        let analysis = TransferPricingEngine::validate_price(&env, 200_000, &comparable);
         
         assert!(!analysis.defensible);
         assert_eq!(analysis.transfer_price, 200_000);
@@ -355,7 +355,7 @@ mod transfer_pricing_tests {
     #[test]
     fn test_transfer_price_no_comparables() {
         let comparable: Vec<u64> = Vec::new(&Env::default());
-        let analysis = TransferPricingEngine::validate_price(150_000, &comparable);
+        let analysis = TransferPricingEngine::validate_price(&env, 150_000, &comparable);
         
         // Without comparables, arm's length price = transfer price
         assert_eq!(analysis.arms_length_price, 150_000);

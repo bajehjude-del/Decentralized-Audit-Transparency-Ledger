@@ -3,6 +3,9 @@ name: Reproducible WASM Build
 permissions:
   contents: read
   actions: read
+  id-token: write
+  attestations: write
+  packages: write
 
 on:
   pull_request:
@@ -21,6 +24,8 @@ jobs:
     permissions:
       contents: read
       actions: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,6 +37,11 @@ jobs:
           toolchain: 1.85.0
           components: clippy, rustfmt
           targets: wasm32v1-none
+
+      - name: Install cargo-audit and cargo-cyclonedx
+        run: |
+          cargo install cargo-audit --locked
+          cargo install cargo-cyclonedx --locked
 
       # First build
       - name: Build WASM (first pass)
@@ -76,6 +86,16 @@ jobs:
           fi
           echo "SUCCESS: Both builds produced identical WASM binaries."
 
+      - name: Run cargo-audit (dependency vulnerability scan)
+        run: |
+          cargo audit --json > cargo-audit-report.json || true
+          cargo audit
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          cargo cyclonedx --format json --output-cdx sbom-cyclonedx.json
+          cargo cyclonedx --format xml --output-cdx sbom-cyclonedx.xml
+
       - name: Save SHA-256
         run: |
           echo "${{ steps.hash1.outputs.sha256 }}" > wasm-sha256.txt
@@ -94,6 +114,46 @@ jobs:
           name: audit_ledger.wasm
           path: target/wasm32v1-none/release/audit_ledger.wasm
           retention-days: 30
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom-cyclonedx.json
+            sbom-cyclonedx.xml
+          retention-days: 30
+
+      - name: Upload cargo-audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-audit-report
+          path: cargo-audit-report.json
+          retention-days: 30
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign WASM artifact with cosign (keyless)
+        run: |
+          cosign sign-blob --yes \
+            --output-signature audit_ledger.wasm.sig \
+            --output-certificate audit_ledger.wasm.pem \
+            target/wasm32v1-none/release/audit_ledger.wasm
+
+      - name: Upload cosign signature and certificate
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-signature
+          path: |
+            audit_ledger.wasm.sig
+            audit_ledger.wasm.pem
+          retention-days: 30
+
+      - name: Generate build provenance attestation (in-toto / SLSA)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: target/wasm32v1-none/release/audit_ledger.wasm
 
       - name: Post SHA-256 as job summary
         run: |
@@ -115,3 +175,10 @@ jobs:
           echo "3. Build locally: \`cargo build --target wasm32v1-none --release --locked\`" >> "$GITHUB_STEP_SUMMARY"
           echo "4. Verify: \`sha256sum target/wasm32v1-none/release/audit_ledger.wasm\`" >> "$GITHUB_STEP_SUMMARY"
           echo "5. Compare with hash above" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Supply chain security**:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- SBOM (CycloneDX): \`sbom-cyclonedx.json\`, \`sbom-cyclonedx.xml\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Signature: \`audit_ledger.wasm.sig\` + \`audit_ledger.wasm.pem\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Verify signature: \`cosign verify-blob --certificate audit_ledger.wasm.pem --signature audit_ledger.wasm.sig target/wasm32v1-none/release/audit_ledger.wasm\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Verify provenance: \`gh attestation verify target/wasm32v1-none/release/audit_ledger.wasm --repo \$GITHUB_REPOSITORY\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Dependency audit: see \`cargo-audit-report.json\` artifact" >> "$GITHUB_STEP_SUMMARY"

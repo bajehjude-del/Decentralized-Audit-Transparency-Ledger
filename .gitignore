@@ -108,6 +108,9 @@ keystore/
 
 # Benchmark / profiling outputs
 docs/fees-benchmark.txt
+# Contract benchmark run artifacts — the baseline and dated history snapshots
+# in benchmarks/history/ ARE tracked; disposable per-run outputs are not.
+benchmarks/results/
 *.profdata
 *.profraw
 flamegraph.svg

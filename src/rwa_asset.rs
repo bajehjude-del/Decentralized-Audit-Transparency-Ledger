@@ -9,6 +9,7 @@ use crate::rwa_types::{
     AssetClass, ComplianceFramework, RwaConfig, RwaToken, TokenizationStatus,
 };
 use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::xdr::ToXdr;
 
 // ── Storage Key ───────────────────────────────────────────────────────────────
 
@@ -411,7 +412,7 @@ impl AssetRegistry {
     /// Derive a deterministic token ID.
     pub fn compute_token_id(env: &Env, issuer: &Address, external_id: &Bytes) -> BytesN<32> {
                 let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, issuer.to_xdr().as_ref()));
+        input.append(&issuer.to_xdr(env));
         input.append(external_id);
         input.append(&Bytes::from_slice(
             env,

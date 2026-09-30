@@ -1,7 +1,7 @@
 #![no_std]
 
 use crate::sandbox_types::*;
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{contracttype, Bytes, BytesN, Env};
 
 /// Isolated sandbox environment for controlled testing.
 #[contracttype]
@@ -12,7 +12,7 @@ pub struct SandboxInstance {
     /// Participant ID
     pub participant_id: BytesN<32>,
     /// Environment level
-    pub environment: u8, // SandboxEnvironment as u8
+    pub environment: u32, // SandboxEnvironment as u32
     /// Relaxed requirements active
     pub relaxed_requirements: RelaxedRequirements,
     /// Daily volume used
@@ -66,13 +66,13 @@ impl EnvironmentManager {
         Ok(SandboxInstance {
             sandbox_id,
             participant_id,
-            environment: environment as u8,
+            environment: environment as u32,
             relaxed_requirements: relaxed_reqs,
             daily_volume_used: 0,
             daily_volume_limit: daily_limit,
             is_fully_isolated: true,
             transaction_count: 0,
-            state_hash: BytesN::zero(),
+            state_hash: BytesN::from_array(env, &[0u8; 32]),
         })
     }
 
@@ -80,10 +80,10 @@ impl EnvironmentManager {
     pub fn compute_sandbox_id(env: &Env, participant_id: &BytesN<32>) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, participant_id.as_ref()));
+        input.append(&participant_id.to_bytes());
         input.append(&Bytes::from_slice(env, b"SANDBOX"));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Check transaction against sandbox limits
@@ -93,9 +93,9 @@ impl EnvironmentManager {
     ) -> Result<TransactionApprovalStatus, &'static str> {
         // Get environment for max transaction check
         let env_level = match sandbox.environment {
-            e if e == SandboxEnvironment::Level1PoC as u8 => SandboxEnvironment::Level1PoC,
-            e if e == SandboxEnvironment::Level2Beta as u8 => SandboxEnvironment::Level2Beta,
-            e if e == SandboxEnvironment::Level3Production as u8 => SandboxEnvironment::Level3Production,
+            e if e == SandboxEnvironment::Level1PoC as u32 => SandboxEnvironment::Level1PoC,
+            e if e == SandboxEnvironment::Level2Beta as u32 => SandboxEnvironment::Level2Beta,
+            e if e == SandboxEnvironment::Level3Production as u32 => SandboxEnvironment::Level3Production,
             _ => return Err("Invalid environment"),
         };
 
@@ -137,7 +137,7 @@ impl EnvironmentManager {
 
     /// Compute compliance score for sandbox usage (0-100)
     pub fn compute_compliance_score(
-        sandbox: &SandboxInstance,
+        _sandbox: &SandboxInstance,
         failed_checks: u32,
         total_checks: u32,
     ) -> u32 {
@@ -151,7 +151,7 @@ impl EnvironmentManager {
 
     /// Check if relaxed requirements are being abused
     pub fn detect_abuse(
-        sandbox: &SandboxInstance,
+        _sandbox: &SandboxInstance,
         transaction_count: u32,
         failed_compliance: u32,
     ) -> bool {
@@ -174,11 +174,11 @@ impl EnvironmentManager {
     pub fn update_state_hash(env: &Env, sandbox: &mut SandboxInstance) {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, sandbox.sandbox_id.as_ref()));
+        input.append(&sandbox.sandbox_id.to_bytes());
         input.append(&Bytes::from_slice(env, &sandbox.daily_volume_used.to_le_bytes()));
         input.append(&Bytes::from_slice(env, &sandbox.transaction_count.to_le_bytes()));
 
-        sandbox.state_hash = env.crypto().sha256(&input);
+        sandbox.state_hash = env.crypto().sha256(&input).to_bytes();
     }
 }
 

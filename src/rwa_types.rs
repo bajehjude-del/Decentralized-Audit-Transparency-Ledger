@@ -34,16 +34,16 @@ pub enum AssetClass {
 
 impl AssetClass {
     /// Return a short Symbol tag suitable for on-chain storage keys.
-    pub fn as_symbol(&self) -> Symbol {
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
         match self {
-            AssetClass::RealEstate => Symbol::new(&[b"REAL_EST"]),
-            AssetClass::Equity => Symbol::new(&[b"EQUITY"]),
-            AssetClass::Debt => Symbol::new(&[b"DEBT"]),
-            AssetClass::Commodity => Symbol::new(&[b"COMMODITY"]),
-            AssetClass::IntellectualProperty => Symbol::new(&[b"IP"]),
-            AssetClass::Infrastructure => Symbol::new(&[b"INFRA"]),
-            AssetClass::TradeFinance => Symbol::new(&[b"TRADE_FIN"]),
-            AssetClass::PrivateFund => Symbol::new(&[b"PVT_FUND"]),
+            AssetClass::RealEstate => Symbol::new(env, "REAL_EST"),
+            AssetClass::Equity => Symbol::new(env, "EQUITY"),
+            AssetClass::Debt => Symbol::new(env, "DEBT"),
+            AssetClass::Commodity => Symbol::new(env, "COMMODITY"),
+            AssetClass::IntellectualProperty => Symbol::new(env, "IP"),
+            AssetClass::Infrastructure => Symbol::new(env, "INFRA"),
+            AssetClass::TradeFinance => Symbol::new(env, "TRADE_FIN"),
+            AssetClass::PrivateFund => Symbol::new(env, "PVT_FUND"),
         }
     }
 

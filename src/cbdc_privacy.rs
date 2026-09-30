@@ -1,7 +1,8 @@
 #![no_std]
 
 use crate::cbdc_types::{CBDCTransaction, PrivacyTier};
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env};
+use soroban_sdk::xdr::ToXdr;
 
 /// Privacy-masked transaction for confidential operations.
 #[contracttype]
@@ -10,7 +11,7 @@ pub struct MaskedTransaction {
     /// Content hash representing this transaction (for audit trail without exposing details)
     pub content_hash: BytesN<32>,
     /// Privacy tier applied
-    pub privacy_tier: u8, // PrivacyTier as u8
+    pub privacy_tier: u32, // PrivacyTier as u32
     /// Encrypted fields (only present at privacy levels >= Pseudonymous)
     pub encrypted_data: Option<Bytes>,
     /// Decryption key holder(s) - addresses that can decrypt
@@ -23,7 +24,7 @@ pub struct MaskedTransaction {
 
 impl MaskedTransaction {
     pub fn is_public(&self) -> bool {
-        self.privacy_tier == PrivacyTier::Public as u8
+        self.privacy_tier == PrivacyTier::Public as u32
     }
 
     pub fn is_encrypted(&self) -> bool {
@@ -31,7 +32,7 @@ impl MaskedTransaction {
     }
 
     pub fn requires_decryption_key(&self) -> bool {
-        self.privacy_tier >= PrivacyTier::Pseudonymous as u8
+        self.privacy_tier >= PrivacyTier::Pseudonymous as u32
     }
 }
 
@@ -55,15 +56,15 @@ pub struct PrivacyACL {
 
 impl PrivacyACL {
     pub fn has_read_access(&self, address: &Address) -> bool {
-        self.read_access.iter().any(|addr| addr == address)
+        self.read_access.iter().any(|addr| addr == *address)
     }
 
     pub fn has_audit_access(&self, address: &Address) -> bool {
-        self.audit_access.iter().any(|addr| addr == address)
+        self.audit_access.iter().any(|addr| addr == *address)
     }
 
     pub fn has_regulatory_access(&self, address: &Address) -> bool {
-        self.regulatory_access.iter().any(|addr| addr == address)
+        self.regulatory_access.iter().any(|addr| addr == *address)
     }
 
     pub fn is_expired(&self, current_time: u64) -> bool {
@@ -102,11 +103,11 @@ impl PrivacyManager {
 
         Ok(MaskedTransaction {
             content_hash,
-            privacy_tier: privacy_tier as u8,
+            privacy_tier: privacy_tier as u32,
             encrypted_data,
             authorized_decrypters,
             masked_at: now,
-            encryption_metadata: Self::encryption_metadata(privacy_tier),
+            encryption_metadata: Self::encryption_metadata(env, privacy_tier),
         })
     }
 
@@ -117,10 +118,10 @@ impl PrivacyManager {
     ) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, transaction.tx_id.as_ref()));
+        input.append(&transaction.tx_id.to_bytes());
         input.append(&Bytes::from_slice(env, &transaction.timestamp.to_le_bytes()));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Encrypt transaction data based on privacy tier
@@ -141,8 +142,8 @@ impl PrivacyManager {
                                 let mut amount_input = Bytes::new(env);
                 amount_input.append(&Bytes::from_slice(env, &transaction.amount_source.to_le_bytes()));
                 amount_input.append(&Bytes::from_slice(env, &transaction.exchange_rate.to_le_bytes()));
-                let amount_hash = env.crypto().sha256(&amount_input);
-                encrypted.append(&Bytes::from_slice(env, amount_hash.as_ref()));
+                let amount_hash = env.crypto().sha256(&amount_input).to_bytes();
+                encrypted.append(&amount_hash.to_bytes());
 
                 Ok(encrypted)
             }
@@ -152,24 +153,24 @@ impl PrivacyManager {
 
                 sensitive_input.append(&Bytes::from_slice(env, &transaction.source_pilot.to_le_bytes()));
                 sensitive_input.append(&Bytes::from_slice(env, &transaction.dest_pilot.to_le_bytes()));
-                sensitive_input.append(&Bytes::from_slice(env, transaction.from.to_xdr().as_ref()));
-                sensitive_input.append(&Bytes::from_slice(env, transaction.to.to_xdr().as_ref()));
+                sensitive_input.append(&transaction.from.clone().to_xdr(env));
+                sensitive_input.append(&transaction.to.clone().to_xdr(env));
                 sensitive_input.append(&Bytes::from_slice(env, &transaction.amount_source.to_le_bytes()));
                 sensitive_input.append(&Bytes::from_slice(env, &transaction.amount_dest.to_le_bytes()));
 
-                let encrypted_hash = env.crypto().sha256(&sensitive_input);
-                Ok(Bytes::from_slice(env, encrypted_hash.as_ref()))
+                let encrypted_hash = env.crypto().sha256(&sensitive_input).to_bytes();
+                Ok(encrypted_hash.to_bytes())
             }
             PrivacyTier::RegulatoryConfidential => {
                 // Minimal exposure, full encryption
                                 let mut full_input = Bytes::new(env);
 
-                full_input.append(&Bytes::from_slice(env, transaction.tx_id.as_ref()));
+                full_input.append(&transaction.tx_id.to_bytes());
                 full_input.append(&Bytes::from_slice(env, &transaction.timestamp.to_le_bytes()));
                 full_input.append(&transaction.metadata);
 
-                let encrypted_hash = env.crypto().sha256(&full_input);
-                Ok(Bytes::from_slice(env, encrypted_hash.as_ref()))
+                let encrypted_hash = env.crypto().sha256(&full_input).to_bytes();
+                Ok(encrypted_hash.to_bytes())
             }
             PrivacyTier::Public => {
                 Err("Public transactions should not be encrypted")
@@ -178,15 +179,14 @@ impl PrivacyManager {
     }
 
     /// Get encryption metadata for privacy tier
-    fn encryption_metadata(tier: PrivacyTier) -> Bytes {
-        let bytes = match tier {
-            PrivacyTier::Pseudonymous => b"PSEUDONYMOUS_V1",
-            PrivacyTier::Private => b"PRIVATE_V1",
-            PrivacyTier::RegulatoryConfidential => b"REGULATORY_V1",
-            PrivacyTier::Public => b"NONE",
+    fn encryption_metadata(env: &Env, tier: PrivacyTier) -> Bytes {
+        let label = match tier {
+            PrivacyTier::Pseudonymous => "PSEUDONYMOUS_V1",
+            PrivacyTier::Private => "PRIVATE_V1",
+            PrivacyTier::RegulatoryConfidential => "REGULATORY_V1",
+            PrivacyTier::Public => "NONE",
         };
-
-        Bytes::from_slice(&soroban_sdk::Env::default(), bytes)
+        Bytes::from_slice(env, label.as_bytes())
     }
 
     /// Create privacy ACL for transaction
@@ -219,10 +219,10 @@ impl PrivacyManager {
     pub fn compute_acl_id(env: &Env, transaction_hash: &BytesN<32>) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, transaction_hash.as_ref()));
+        input.append(&transaction_hash.to_bytes());
         input.append(&Bytes::from_slice(env, b"ACL_V1"));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Validate privacy configuration

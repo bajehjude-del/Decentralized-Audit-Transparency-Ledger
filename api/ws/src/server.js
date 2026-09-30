@@ -15,7 +15,7 @@ const MAX_SUBSCRIPTIONS_PER_CONNECTION = 50;
 const JWT_ISSUER = process.env.JWT_ISSUER;
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE;
 const JWT_PUBLIC_KEY = process.env.JWT_PUBLIC_KEY?.replace(/\\n/g, '\n');
-const EVENT_BUS_CHANNEL = process.env.EVENT_BUS_CHANNEL || 'audit-ledger:events';
+const EVENT_BUS_CHANNEL = process.env.EVENT_BUS_CHANNEL || 'audit-ledger:bus:events';
 const REDIS_URL = process.env.REDIS_URL;
 const publisher = REDIS_URL ? createClient({ url: REDIS_URL }) : null;
 const subscriber = publisher ? publisher.duplicate() : null;
@@ -205,7 +205,7 @@ app.post('/emit', (req, res) => {
 // Health check endpoints (#268)
 const wsStartTime = Date.now();
 
-app.get('/healthz', (req, res) => res.json({
+app.get('healthz', (req, res) => res.json({
   status: 'ok',
   service: 'websocket',
   uptime: Math.floor((Date.now() - wsStartTime) / 1000),

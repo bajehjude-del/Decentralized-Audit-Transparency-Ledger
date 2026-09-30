@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dap": "ts-node src/cli.ts dap"
+    "dap": "ts-node src/cli.ts dap",
+    "prepack": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
@@ -28,5 +29,9 @@
     "tracer",
     "audit-ledger"
   ],
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "files": [
+    "dist",
+    "vscode"
+  ]
 }

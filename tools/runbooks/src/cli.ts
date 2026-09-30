@@ -7,6 +7,10 @@ import { contractPauseRunbook } from './tasks/contract-pause';
 import { capIncreaseRunbook } from './tasks/cap-increase';
 import { schemaUpdateRunbook } from './tasks/schema-update';
 import { bridgeFailoverRunbook } from './tasks/bridge-failover';
+import { contractUpgradeFailureRunbook } from './tasks/contract-upgrade-failure';
+import { rpcOutageRunbook } from './tasks/rpc-outage';
+import { databaseCorruptionRunbook } from './tasks/database-corruption';
+import { monitoringStackOutageRunbook } from './tasks/monitoring-stack-outage';
 
 const program = new Command();
 
@@ -15,7 +19,12 @@ const runbooks: Record<string, RunbookDefinition> = {
   'cap-increase': capIncreaseRunbook,
   'schema-update': schemaUpdateRunbook,
   'bridge-failover': bridgeFailoverRunbook,
+  'contract-upgrade-failure': contractUpgradeFailureRunbook,
+  'rpc-outage': rpcOutageRunbook,
+  'database-corruption': databaseCorruptionRunbook,
+  'monitoring-stack-outage': monitoringStackOutageRunbook,
 };
+
 
 program
   .name('runbook-cli')

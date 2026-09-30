@@ -1,0 +1,32 @@
+{
+  "name": "audit-ledger-subgraph",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "codegen": "graph codegen --subgraph subgraph.yaml",
+    "build": "graph build --subgraph subgraph.yaml",
+    "deploy": "graph deploy --subgraph subgraph.yaml",
+    "deploy:local": "graph deploy --subgraph subgraph.yaml --node http://localhost:8020 --ip-fs http://localhost:5001",
+    "create:local": "graph create --node http://localhost:8020 ${SUBGRAPH_NAME:-audit-ledger}",
+    "test": "npm run codegen && graph test",
+    "lint": "eslint --ext .ts src",
+    "format": "prettier --write 'subgraph.yaml' 'src/**/*.ts' '*.json'",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@apache-arrow/arrow": "17.0.0",
+    "@graphprotocol/graph-cli": "0.66.0",
+    "@graphprotocol/graph-ts": "0.35.0",
+    "assemblyscript": "0.27.5",
+    "global": "4.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.11.10",
+    "@typescript-eslint/eslint-plugin": "7.2.0",
+    "@typescript-eslint/parser": "7.2.0",
+    "eslint": "8.57.0",
+    "prettier": "3.3.3",
+    "typescript": "5.4.3"
+  }
+}

@@ -1,7 +1,32 @@
 openapi: 3.1.0
 info:
   title: Audit Ledger REST API
-  description: REST adapter for Decentralized Audit & Transparency Ledger
+  description: |
+    REST adapter for Decentralized Audit & Transparency Ledger.
+
+    ## Authentication
+    Public read endpoints do not require authentication. Write endpoints
+    (e.g. `POST /cache/invalidate`) accept an optional bearer token via the
+    `Authorization` header. When `AUTH_REQUIRED=true` is set on the server,
+    all non-health endpoints require a valid JWT bearer token.
+
+    ## Rate limiting
+    Requests are rate limited per client IP. Limits are advertised via the
+    `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`
+    response headers. When the limit is exceeded the API returns `429` with
+    a `Retry-After` header and an RFC 9457 problem details body.
+
+    ## Errors
+    All error responses use the `application/problem+json` media type and
+    follow RFC 9457. See the `Errors` tag and the `ErrorResponse` schema for
+    the stable machine-readable error codes.
+
+    ## Versioning & deprecation
+    The current stable version is `v1`, served under `/v1`. Unversioned
+    paths redirect to `/v1`. Breaking changes are introduced only in a new
+    major version path. Deprecated endpoints are annotated with
+    `deprecated: true` and remain available for at least one minor release
+    cycle before removal.
   version: 1.2.0
 servers:
   - url: http://localhost:3002/v1
@@ -18,6 +43,8 @@ tags:
     description: Cache management and statistics
   - name: Errors
     description: RFC 9457 problem details
+  - name: Governance
+    description: Contract administration, roles, caps, schemas, and multi-sig workflows
 
 paths:
   /healthz:
@@ -91,6 +118,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExportResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /export/events.csv:
     get:
@@ -122,6 +151,8 @@ paths:
             text/csv:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /export/events/stream:
     get:
@@ -149,6 +180,8 @@ paths:
               schema:
                 type: string
                 enum: [running, completed, failed]
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /export/progress:
     get:
@@ -158,6 +191,8 @@ paths:
       responses:
         "200":
           description: Current export status
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /events/stream:
     get:
@@ -181,6 +216,8 @@ paths:
             text/event-stream:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /events:
     get:
@@ -245,6 +282,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /events/{index}:
     get:
@@ -285,6 +324,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /events/type/{type}:
     get:
@@ -316,6 +357,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /cache/stats:
     get:
@@ -337,6 +380,8 @@ paths:
                   totalRequests: 180
                   hitRate: "83.3%"
                   lastReset: "2025-01-01T00:00:00.000Z"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /cache/invalidate:
     post:
@@ -345,6 +390,8 @@ paths:
       description: Resets all cache statistics and forces fresh responses on next requests.
       tags:
         - Cache
+      security:
+        - bearerAuth: []
       responses:
         "200":
           description: Cache invalidated
@@ -361,6 +408,14 @@ paths:
               example:
                 data:
                   message: "Cache invalidated successfully"
+        "401":
+          description: Authentication required or invalid credentials
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /health:
     get:
@@ -379,7 +434,599 @@ paths:
                   timestamp:
                     type: integer
 
+  /governance/roles:
+    get:
+      summary: List all roles and their holders
+      operationId: listRoles
+      tags: [Governance]
+      responses:
+        "200":
+          description: List of roles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      summary: Assign a role to an address
+      operationId: assignRole
+      tags: [Governance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoleAssignmentRequest"
+      responses:
+        "200":
+          description: Role assigned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Role already assigned
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /governance/roles/{address}:
+    delete:
+      summary: Revoke all roles from an address
+      operationId: revokeRole
+      tags: [Governance]
+      parameters:
+        - $ref: "#/components/parameters/PathAddress"
+      responses:
+        "200":
+          description: Role revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /governance/caps:
+    get:
+      summary: Get global and per-event-type caps
+      operationId: getCaps
+      tags: [Governance]
+      responses:
+        "200":
+          description: Current caps
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      summary: Set global and/or per-event-type caps
+      operationId: setCaps
+      tags: [Governance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapsUpdateRequest"
+      responses:
+        "200":
+          description: Caps updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /governance/schemas:
+    get:
+      summary: List registered schemas
+      operationId: listSchemas
+      tags: [Governance]
+      responses:
+        "200":
+          description: Registered schemas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchemaListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      summary: Register a new schema
+      operationId: registerSchema
+      tags: [Governance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SchemaRegisterRequest"
+      responses:
+        "201":
+          description: Schema registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Schema already exists
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /governance/schemas/{name}/versions:
+    post:
+      summary: Add a new version to an existing schema
+      operationId: versionSchema
+      tags: [Governance]
+      parameters:
+        - $ref: "#/components/parameters/PathSchemaName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SchemaVersionRequest"
+      responses:
+        "200":
+          description: Schema version added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /governance/schemas/{name}/migrate:
+    post:
+      summary: Migrate a schema to a target version
+      operationId: migrateSchema
+      tags: [Governance]
+      parameters:
+        - $ref: "#/components/parameters/PathSchemaName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SchemaMigrateRequest"
+      responses:
+        "200":
+          description: Schema migrated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /governance/ttl:
+    get:
+      summary: Get event TTL configuration and monitoring
+      operationId: getTtl
+      tags: [Governance]
+      responses:
+        "200":
+          description: TTL configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TtlResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      summary: Update event TTL configuration
+      operationId: setTtl
+      tags: [Governance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TtlUpdateRequest"
+      responses:
+        "200":
+          description: TTL updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /governance/pause:
+    post:
+      summary: Pause the contract
+      operationId: pauseContract
+      tags: [Governance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceReasonRequest"
+      responses:
+        "200":
+          description: Contract paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Contract already paused
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /governance/unpause:
+    post:
+      summary: Unpause the contract
+      operationId: unpauseContract
+      tags: [Governance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceReasonRequest"
+      responses:
+        "200":
+          description: Contract unpaused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Contract not paused
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /governance/submitters:
+    get:
+      summary: List submitter blocklist and allowlist entries
+      operationId: listSubmitterLists
+      tags: [Governance]
+      responses:
+        "200":
+          description: Submitter lists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitterListsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      summary: Add or remove a submitter from blocklist/allowlist
+      operationId: updateSubmitterList
+      tags: [Governance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitterListUpdateRequest"
+      responses:
+        "200":
+          description: Submitter list updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /governance/rate-limits:
+    get:
+      summary: List per-submitter rate limit configuration
+      operationId: listRateLimits
+      tags: [Governance]
+      responses:
+        "200":
+          description: Rate limit configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RateLimitListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      summary: Set rate limit for a submitter
+      operationId: setRateLimit
+      tags: [Governance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RateLimitUpdateRequest"
+      responses:
+        "200":
+          description: Rate limit updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /governance/nonce:
+    get:
+      summary: Get nonce configuration
+      operationId: getNonceConfig
+      tags: [Governance]
+      responses:
+        "200":
+          description: Nonce configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NonceConfigResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      summary: Update nonce configuration
+      operationId: setNonceConfig
+      tags: [Governance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NonceConfigUpdateRequest"
+      responses:
+        "200":
+          description: Nonce configuration updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /governance/upgrade:
+    post:
+      summary: Propose or execute a contract upgrade with verification
+      operationId: upgradeContract
+      tags: [Governance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpgradeRequest"
+      responses:
+        "200":
+          description: Upgrade proposed or executed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Upgrade verification failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /governance/audit-log:
+    get:
+      summary: List governance audit log entries
+      operationId: listGovernanceAuditLog
+      tags: [Governance]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/FilterStartTime"
+        - $ref: "#/components/parameters/FilterEndTime"
+      responses:
+        "200":
+          description: Paginated governance audit log
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceAuditLogResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /governance/proposals:
+    get:
+      summary: List multi-sig proposals
+      operationId: listProposals
+      tags: [Governance]
+      responses:
+        "200":
+          description: List of proposals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProposalListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      summary: Create a multi-sig proposal
+      operationId: createProposal
+      tags: [Governance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProposalCreateRequest"
+      responses:
+        "201":
+          description: Proposal created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proposal"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /governance/proposals/{id}:
+    get:
+      summary: Get a multi-sig proposal by id
+      operationId: getProposal
+      tags: [Governance]
+      parameters:
+        - $ref: "#/components/parameters/PathProposalId"
+      responses:
+        "200":
+          description: Proposal details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proposal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /governance/proposals/{id}/approve:
+    post:
+      summary: Approve a multi-sig proposal
+      operationId: approveProposal
+      tags: [Governance]
+      parameters:
+        - $ref: "#/components/parameters/PathProposalId"
+      responses:
+        "200":
+          description: Proposal approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proposal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Proposal already approved by this signer or already executed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /governance/proposals/{id}/execute:
+    post:
+      summary: Execute a multi-sig proposal once threshold is met
+      operationId: executeProposal
+      tags: [Governance]
+      parameters:
+        - $ref: "#/components/parameters/PathProposalId"
+      responses:
+        "200":
+          description: Proposal executed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceActionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Approval threshold not met
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Optional JWT bearer token. Required for write endpoints when the
+        server is configured with `AUTH_REQUIRED=true`.
+
   parameters:
     Limit:
       name: limit
@@ -448,6 +1095,30 @@ components:
         enum: [asc, desc]
         default: asc
       description: Sort order (ascending or descending)
+    PathAddress:
+      name: address
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 128
+      description: Stellar address of the target account
+    PathSchemaName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 128
+      description: Schema name
+    PathProposalId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 128
+      description: Multi-sig proposal identifier
 
   responses:
     TooManyRequests:
@@ -469,8 +1140,53 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    BadRequest:
+      description: Invalid request payload or parameters
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Caller lacks required role
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    CacheStats:
+      type: object
+      description: Cache statistics snapshot
+      properties:
+        hits:
+          type: integer
+        misses:
+          type: integer
+        totalRequests:
+          type: integer
+        hitRate:
+          type: string
+        lastReset:
+          type: string
+          format: date-time
+      required:
+        - hits
+        - misses
+        - totalRequests
+        - hitRate
+
     HealthStatus:
       type: object
       properties:
@@ -632,3 +1348,454 @@ components:
                     type: string
       required:
         - error
+
+    Role:
+      type: object
+      description: A governance role and its assigned holders
+      properties:
+        name:
+          type: string
+          description: Role name (e.g. admin, operator, auditor)
+        holders:
+          type: array
+          items:
+            type: string
+          description: Addresses currently holding this role
+      required:
+        - name
+        - holders
+
+    RoleListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Role"
+      required:
+        - data
+
+    RoleAssignmentRequest:
+      type: object
+      required:
+        - address
+        - role
+      properties:
+        address:
+          type: string
+          maxLength: 128
+        role:
+          type: string
+          maxLength: 64
+        reason:
+          type: string
+          maxLength: 512
+
+    CapsResponse:
+      type: object
+      properties:
+        globalMaxLogs:
+          type: integer
+          description: Global cap (0 = unlimited)
+        perEventType:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Cap per event type (0 = unlimited)
+      required:
+        - globalMaxLogs
+        - perEventType
+
+    CapsUpdateRequest:
+      type: object
+      properties:
+        globalMaxLogs:
+          type: integer
+          minimum: 0
+        perEventType:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        reason:
+          type: string
+          maxLength: 512
+
+    Schema:
+      type: object
+      properties:
+        name:
+          type: string
+        latestVersion:
+          type: integer
+        versions:
+          type: array
+          items:
+            type: integer
+        definition:
+          type: string
+          description: Schema definition (JSON-encoded)
+      required:
+        - name
+        - latestVersion
+        - versions
+        - definition
+
+    SchemaListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Schema"
+      required:
+        - data
+
+    SchemaRegisterRequest:
+      type: object
+      required:
+        - name
+        - definition
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        definition:
+          type: string
+        reason:
+          type: string
+          maxLength: 512
+
+    SchemaVersionRequest:
+      type: object
+      required:
+        - definition
+      properties:
+        definition:
+          type: string
+        reason:
+          type: string
+          maxLength: 512
+
+    SchemaMigrateRequest:
+      type: object
+      required:
+        - targetVersion
+      properties:
+        targetVersion:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          maxLength: 512
+
+    TtlResponse:
+      type: object
+      properties:
+        defaultTtlSeconds:
+          type: integer
+        perEventType:
+          type: object
+          additionalProperties:
+            type: integer
+        monitored:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Count of events approaching TTL per type
+      required:
+        - defaultTtlSeconds
+        - perEventType
+
+    TtlUpdateRequest:
+      type: object
+      properties:
+        defaultTtlSeconds:
+          type: integer
+          minimum: 0
+        perEventType:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        reason:
+          type: string
+          maxLength: 512
+
+    GovernanceReasonRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          maxLength: 512
+
+    SubmitterListsResponse:
+      type: object
+      properties:
+        blocklist:
+          type: array
+          items:
+            type: string
+        allowlist:
+          type: array
+          items:
+            type: string
+      required:
+        - blocklist
+        - allowlist
+
+    SubmitterListUpdateRequest:
+      type: object
+      required:
+        - list
+        - action
+        - address
+      properties:
+        list:
+          type: string
+          enum: [blocklist, allowlist]
+        action:
+          type: string
+          enum: [add, remove]
+        address:
+          type: string
+          maxLength: 128
+        reason:
+          type: string
+          maxLength: 512
+
+    RateLimitEntry:
+      type: object
+      properties:
+        submitter:
+          type: string
+        requestsPerWindow:
+          type: integer
+        windowSeconds:
+          type: integer
+      required:
+        - submitter
+        - requestsPerWindow
+        - windowSeconds
+
+    RateLimitListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/RateLimitEntry"
+      required:
+        - data
+
+    RateLimitUpdateRequest:
+      type: object
+      required:
+        - submitter
+        - requestsPerWindow
+        - windowSeconds
+      properties:
+        submitter:
+          type: string
+          maxLength: 128
+        requestsPerWindow:
+          type: integer
+          minimum: 0
+        windowSeconds:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          maxLength: 512
+
+    NonceConfigResponse:
+      type: object
+      properties:
+        enforceMonotonic:
+          type: boolean
+        maxDrift:
+          type: integer
+        currentNonce:
+          type: integer
+      required:
+        - enforceMonotonic
+        - maxDrift
+        - currentNonce
+
+    NonceConfigUpdateRequest:
+      type: object
+      properties:
+        enforceMonotonic:
+          type: boolean
+        maxDrift:
+          type: integer
+          minimum: 0
+        reason:
+          type: string
+          maxLength: 512
+
+    UpgradeRequest:
+      type: object
+      required:
+        - wasmHash
+        - mode
+      properties:
+        wasmHash:
+          type: string
+          maxLength: 128
+        mode:
+          type: string
+          enum: [propose, execute]
+        verificationProof:
+          type: string
+        reason:
+          type: string
+          maxLength: 512
+
+    GovernanceActionResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            action:
+              type: string
+            status:
+              type: string
+              enum: [applied, pending, rejected]
+            auditLogId:
+              type: string
+            proposalId:
+              type: string
+      required:
+        - data
+
+    GovernanceAuditEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: integer
+        actor:
+          type: string
+        action:
+          type: string
+        target:
+          type: string
+        reason:
+          type: string
+        outcome:
+          type: string
+          enum: [success, failure]
+      required:
+        - id
+        - timestamp
+        - actor
+        - action
+        - outcome
+
+    GovernanceAuditLogResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/GovernanceAuditEntry"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required:
+        - data
+        - total
+        - limit
+        - offset
+
+    ProposalAction:
+      type: object
+      description: Action to be executed when a proposal is approved
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - assignRole
+            - revokeRole
+            - setCaps
+            - registerSchema
+            - versionSchema
+            - migrateSchema
+            - setTtl
+            - pause
+            - unpause
+            - updateSubmitterList
+            - setRateLimit
+            - setNonceConfig
+            - upgrade
+        payload:
+          type: object
+          additionalProperties: true
+
+    Proposal:
+      type: object
+      properties:
+        id:
+          type: string
+        proposer:
+          type: string
+        action:
+          $ref: "#/components/schemas/ProposalAction"
+        approvals:
+          type: array
+          items:
+            type: string
+        threshold:
+          type: integer
+        status:
+          type: string
+          enum: [pending, approved, executed, rejected, expired]
+        createdAt:
+          type: integer
+        expiresAt:
+          type: integer
+      required:
+        - id
+        - proposer
+        - action
+        - approvals
+        - threshold
+        - status
+        - createdAt
+
+    ProposalListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Proposal"
+      required:
+        - data
+
+    ProposalCreateRequest:
+      type: object
+      required:
+        - action
+        - threshold
+      properties:
+        action:
+          $ref: "#/components/schemas/ProposalAction"
+        threshold:
+          type: integer
+          minimum: 1
+        expiresAt:
+          type: integer
+        reason:
+          type: string
+          maxLength: 512

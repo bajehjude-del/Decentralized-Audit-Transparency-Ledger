@@ -22,22 +22,18 @@ use crate::regulatory_reporting::{
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Check whether `haystack` contains the ASCII bytes of `needle`.
-fn contains_key(haystack: &Bytes, needle: &[u8]) -> bool {
-    if needle.is_empty() || haystack.len() < needle.len() as u32 {
-        return false;
-    }
-    let h_len = haystack.len() as usize;
+fn contains_key(haystack: &Bytes, needle: &Bytes) -> bool {
     let n_len = needle.len();
-    if h_len < n_len {
+    let h_len = haystack.len();
+    if n_len == 0 || h_len < n_len {
         return false;
     }
-    'outer: for start in 0..=(h_len - n_len) {
-        for (i, &b) in needle.iter().enumerate() {
-            if haystack.get(start as u32 + i as u32).unwrap_or(0) != b {
-                continue 'outer;
-            }
+    let mut start = 0u32;
+    while start + n_len <= h_len {
+        if &haystack.slice(start..start + n_len) == needle {
+            return true;
         }
-        return true;
+        start += 1;
     }
     false
 }
@@ -104,7 +100,7 @@ fn validate_content_nonempty(env: &Env, report: &RegulatoryReport, errors: &mut 
 fn validate_authority_tag(
     env: &Env,
     report: &RegulatoryReport,
-    expected: &[u8],
+    expected: &Bytes,
     errors: &mut Vec<Bytes>,
 ) {
     if !contains_key(&report.content, expected) {
@@ -129,7 +125,7 @@ fn require_keys(
     for key in keys {
         let mut needle = Bytes::from_slice(env, key);
         needle.extend_from_slice(b"=");
-        if !contains_key(content, needle.as_ref()) {
+        if !contains_key(content, &needle) {
             let mut msg = Bytes::from_slice(env, b"content: missing required field: ");
             msg.extend_from_slice(key);
             errors.push_back(msg);
@@ -147,7 +143,7 @@ fn validate_finra(
     errors: &mut Vec<Bytes>,
     warnings: &mut Vec<Bytes>,
 ) {
-    validate_authority_tag(env, report, b"authority=FINRA", errors);
+    validate_authority_tag(env, report, &Bytes::from_slice(env, b"authority=FINRA"), errors);
     match report.format {
         ReportFormat::FinraOATS => {
             require_keys(env, &report.content, &[b"mpid", b"order_count", b"route_count"], errors);
@@ -191,7 +187,7 @@ fn validate_sec(
     errors: &mut Vec<Bytes>,
     warnings: &mut Vec<Bytes>,
 ) {
-    validate_authority_tag(env, report, b"authority=SEC", errors);
+    validate_authority_tag(env, report, &Bytes::from_slice(env, b"authority=SEC"), errors);
     match report.format {
         ReportFormat::SecFormADV => {
             require_keys(
@@ -201,7 +197,7 @@ fn validate_sec(
                 errors,
             );
             // Warn if AUM field exists but appears to be zero
-            if contains_key(&report.content, b"aum_usd=0") {
+            if contains_key(&report.content, &Bytes::from_slice(env, b"aum_usd=0")) {
                 push_warn(env, warnings, b"sec-adv: aum_usd=0 may indicate missing data");
             }
         }
@@ -252,7 +248,7 @@ fn validate_cftc(
     errors: &mut Vec<Bytes>,
     warnings: &mut Vec<Bytes>,
 ) {
-    validate_authority_tag(env, report, b"authority=CFTC", errors);
+    validate_authority_tag(env, report, &Bytes::from_slice(env, b"authority=CFTC"), errors);
     match report.format {
         ReportFormat::CftcLargeTrader => {
             require_keys(
@@ -298,7 +294,7 @@ fn validate_fca(
     errors: &mut Vec<Bytes>,
     warnings: &mut Vec<Bytes>,
 ) {
-    validate_authority_tag(env, report, b"authority=FCA", errors);
+    validate_authority_tag(env, report, &Bytes::from_slice(env, b"authority=FCA"), errors);
     match report.format {
         ReportFormat::FcaMiFIDII => {
             require_keys(
@@ -345,7 +341,7 @@ fn validate_bafin(
     errors: &mut Vec<Bytes>,
     warnings: &mut Vec<Bytes>,
 ) {
-    validate_authority_tag(env, report, b"authority=BaFin", errors);
+    validate_authority_tag(env, report, &Bytes::from_slice(env, b"authority=BaFin"), errors);
     match report.format {
         ReportFormat::BaFinWpHG => {
             require_keys(
@@ -391,7 +387,7 @@ fn validate_mas(
     errors: &mut Vec<Bytes>,
     warnings: &mut Vec<Bytes>,
 ) {
-    validate_authority_tag(env, report, b"authority=MAS", errors);
+    validate_authority_tag(env, report, &Bytes::from_slice(env, b"authority=MAS"), errors);
     match report.format {
         ReportFormat::MasSGX => {
             require_keys(
@@ -437,7 +433,7 @@ fn validate_mica(
     errors: &mut Vec<Bytes>,
     warnings: &mut Vec<Bytes>,
 ) {
-    validate_authority_tag(env, report, b"authority=MiCA", errors);
+    validate_authority_tag(env, report, &Bytes::from_slice(env, b"authority=MiCA"), errors);
     match report.format {
         ReportFormat::MiCACASP => {
             require_keys(
@@ -470,7 +466,7 @@ fn validate_mica(
             );
             // Cross-field: custodian_lei must also satisfy LEI length (20 chars).
             // We can only do a tag-presence check here without full value extraction.
-            if !contains_key(&report.content, b"custodian_lei=") {
+            if !contains_key(&report.content, &Bytes::from_slice(env, b"custodian_lei=")) {
                 push_err(env, errors, b"mica-reserve: custodian_lei is required");
             }
         }

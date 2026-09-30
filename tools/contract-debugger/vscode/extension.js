@@ -14,14 +14,32 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 
 const DEBUG_TYPE = 'audit-ledger-trace';
-const CLI = path.join(__dirname, '..', 'dist', 'cli.js');
+
+/**
+ * Candidate locations for the CLI, most specific first.
+ *
+ * `<extension>/dist` is a self-contained VSIX, where the extension folder ships
+ * its own build. `<extension>/../dist` is the repository layout, where `vscode/`
+ * and `dist/` are siblings. The previous version returned a path that might not
+ * exist, so a packaged install failed later with a spawn ENOENT that says
+ * nothing about the real cause.
+ */
+function cliCandidates() {
+  return [
+    path.join(__dirname, 'dist', 'cli.js'),
+    path.join(__dirname, '..', 'dist', 'cli.js'),
+  ];
+}
 
 /** Locate the packaged CLI, so a broken install fails loudly and early. */
 function resolveCli() {
-  if (fs.existsSync(CLI)) return CLI;
-  const fallback = path.join(__dirname, '..', '..', 'dist', 'cli.js');
-  if (fs.existsSync(fallback)) return fallback;
-  return CLI;
+  const candidates = cliCandidates();
+  const found = candidates.find((p) => fs.existsSync(p));
+  if (found) return found;
+  throw new Error(
+    `audit-ledger-debugger cannot find its CLI (dist/cli.js). Looked in:\n  ${candidates.join('\n  ')}\n` +
+      'Install the package, or run `npm run build` if you are working from a checkout.',
+  );
 }
 
 class TraceDebugAdapter {

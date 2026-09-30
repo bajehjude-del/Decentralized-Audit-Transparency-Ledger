@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StorageLayoutSnapshot",
+  "description": "Snapshot of the AuditLedger contract storage layout for upgrade safety validation",
+  "type": "object",
+  "required": ["version", "contract", "generated_at", "git_commit", "variants"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1, "description": "Schema format version" },
+    "contract": { "type": "string", "description": "Contract name" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "git_commit": { "type": "string", "description": "Git commit SHA or 'unknown'" },
+    "rust_toolchain": { "type": "string" },
+    "variants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ordinal", "name", "kind", "fields", "tombstone"],
+        "properties": {
+          "ordinal": { "type": "integer", "minimum": 0 },
+          "name": { "type": "string" },
+          "kind": { "type": "string", "enum": ["unit", "tuple", "struct"] },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["position", "type"],
+              "properties": {
+                "position": { "type": "integer" },
+                "name": { "type": ["string", "null"] },
+                "type": { "type": "string" }
+              }
+            }
+          },
+          "tombstone": {
+            "type": "boolean",
+            "description": "True if this variant is deprecated/replaced but kept for key collision avoidance"
+          },
+          "comment": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -38,6 +38,12 @@ services:
         max-size: "10m"
         max-file: "3"
     restart: always
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   prometheus:
     deploy:
@@ -55,7 +61,7 @@ services:
         max-file: "3"
     restart: always
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-ready"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -86,6 +92,8 @@ services:
       GF_SERVER_ROUTER_LOGGING: "true"
       GF_LOG_LEVEL: "info"
       GF_LOG_MODE: "console"
+      # Security headers required by ZAP scan (#740)
+      GF_SERVER_CUSTOM_RESPONSE_HEADERS: "Cross-Origin-Embedder-Policy=require-corp;Cross-Origin-Opener-Policy=same-origin;Cross-Origin-Resource-Policy=same-origin"
 
   rest:
     deploy:
@@ -102,12 +110,6 @@ services:
         max-size: "10m"
         max-file: "3"
     restart: always
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3002/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 
   ui:
     deploy:

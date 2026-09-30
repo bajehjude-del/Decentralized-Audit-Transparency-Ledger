@@ -1,6 +1,10 @@
 name: Dependency Scanning
 
 # Resolves: #484 (security scanning in CI/CD)
+# Resolves: reproducible builds and supply chain security
+#
+# Generates SBOMs (SPDX + CycloneDX) for all language ecosystems, signs them
+# with Sigstore/cosign, and produces in-toto/SLSA provenance attestations.
 #
 # Scans all dependency manifests across all language ecosystems in the repo:
 #   • Rust  — cargo-audit (RustSec), cargo-deny (license + ban policy)
@@ -241,10 +245,137 @@ jobs:
           comment-summary-in-pr: always
 
   # ── Policy gate ───────────────────────────────────────────────────────────
+  # ── SBOM generation (SPDX + CycloneDX) ────────────────────────────────────
+  sbom:
+    name: SBOM (${{ matrix.ecosystem }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ecosystem: rust
+            tool: syft
+            target: "dir:."
+          - ecosystem: node
+            tool: syft
+            target: "dir:."
+          - ecosystem: python
+            tool: syft
+            target: "dir:sdk/python"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate SPDX SBOM
+        run: |
+          syft "${{ matrix.target }}" -o spdx-json=sbom-${{ matrix.ecosystem }}.spdx.json
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          syft "${{ matrix.target }}" -o cyclonedx-json=sbom-${{ matrix.ecosystem }}.cdx.json
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign SBOMs with Sigstore (keyless)
+        run: |
+          cosign sign-blob --yes \
+            --output-signature sbom-${{ matrix.ecosystem }}.spdx.json.sig \
+            --output-certificate sbom-${{ matrix.ecosystem }}.spdx.json.pem \
+            sbom-${{ matrix.ecosystem }}.spdx.json
+          cosign sign-blob --yes \
+            --output-signature sbom-${{ matrix.ecosystem }}.cdx.json.sig \
+            --output-certificate sbom-${{ matrix.ecosystem }}.cdx.json.pem \
+            sbom-${{ matrix.ecosystem }}.cdx.json
+
+      - name: Upload SBOMs and signatures
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.ecosystem }}
+          path: |
+            sbom-${{ matrix.ecosystem }}.spdx.json
+            sbom-${{ matrix.ecosystem }}.spdx.json.sig
+            sbom-${{ matrix.ecosystem }}.spdx.json.pem
+            sbom-${{ matrix.ecosystem }}.cdx.json
+            sbom-${{ matrix.ecosystem }}.cdx.json.sig
+            sbom-${{ matrix.ecosystem }}.cdx.json.pem
+          retention-days: 90
+
+  # ── SLSA Level 3 provenance (in-toto attestations) ────────────────────────
+  provenance:
+    name: SLSA provenance (in-toto)
+    runs-on: ubuntu-latest
+    needs: [sbom]
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download all SBOM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sbom-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Generate SLSA provenance attestation
+        run: |
+          cosign attest-blob --yes \
+            --predicate <(cat <<'EOF'
+          {
+            "_type": "https://in-toto.io/Statement/v1",
+            "predicateType": "https://slsa.dev/provenance/v1",
+            "subject": [],
+            "predicate": {
+              "buildDefinition": {
+                "buildType": "https://github.com/actions/runner",
+                "externalParameters": {
+                  "workflow": "${{ github.workflow }}",
+                  "ref": "${{ github.ref }}",
+                  "sha": "${{ github.sha }}"
+                }
+              },
+              "runDetails": {
+                "builder": { "id": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" },
+                "metadata": { "invocationId": "${{ github.run_id }}" }
+              }
+            }
+          }
+          EOF
+          ) \
+            --type slsaprovenance1 \
+            --output-signature provenance.sig \
+            --output-certificate provenance.pem \
+            artifacts/sbom-rust.spdx.json
+
+      - name: Upload provenance attestation
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance
+          path: |
+            provenance.sig
+            provenance.pem
+          retention-days: 90
+
+  # ── Policy gate ───────────────────────────────────────────────────────────
   dep-scan-gate:
     name: Dependency scan policy gate
     runs-on: ubuntu-latest
-    needs: [rust-audit, rust-deny, python-pip-audit]
+    needs: [rust-audit, rust-deny, python-pip-audit, sbom, provenance]
     if: always()
     permissions:
       contents: read
@@ -254,11 +385,19 @@ jobs:
           RUST_AUDIT="${{ needs.rust-audit.result }}"
           RUST_DENY="${{ needs.rust-deny.result }}"
           PY_AUDIT="${{ needs.python-pip-audit.result }}"
+          SBOM="${{ needs.sbom.result }}"
+          PROVENANCE="${{ needs.provenance.result }}"
           echo "cargo-audit: $RUST_AUDIT"
           echo "cargo-deny:  $RUST_DENY"
           echo "pip-audit:   $PY_AUDIT"
+          echo "sbom:        $SBOM"
+          echo "provenance:  $PROVENANCE"
           if [[ "$RUST_AUDIT" == "failure" || "$RUST_DENY" == "failure" ]]; then
             echo "❌ Dependency scan policy gate failed — critical/high vulnerabilities or license violations detected."
+            exit 1
+          fi
+          if [[ "$SBOM" == "failure" || "$PROVENANCE" == "failure" ]]; then
+            echo "❌ Supply chain policy gate failed — SBOM generation or SLSA provenance attestation failed."
             exit 1
           fi
           echo "✅ Dependency scan gate passed."

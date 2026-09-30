@@ -28,7 +28,7 @@
 use soroban_sdk::{Bytes, BytesN, Env, Vec};
 
 use crate::regulatory_reporting::{
-    AuthorityConfig, RegulatoryAuthority, RegulatoryReport, RegulatorySubmission,
+    AuthorityConfig, RegulatoryReport, RegulatorySubmission,
     ReportAction, ReportStatus, ReportingError, SubmissionAcknowledgment,
 };
 
@@ -66,9 +66,9 @@ pub fn check_transition(
 /// Compute a deterministic submission ID from report_id + attempt number.
 pub fn compute_submission_id(env: &Env, report_id: &BytesN<32>, attempt: u32) -> BytesN<32> {
     let mut buf = Bytes::new(env);
-    buf.append(&Bytes::from_slice(env, report_id.as_ref()));
+    buf.append(&report_id.to_bytes());
     buf.extend_from_array(&attempt.to_le_bytes());
-    env.crypto().sha256(&buf)
+    env.crypto().sha256(&buf).to_bytes()
 }
 
 /// Build a new `RegulatorySubmission` for the given report and attempt number.
@@ -98,7 +98,7 @@ pub fn create_submission(
         let base = config.retry_delay_seconds as u64;
         if config.exponential_backoff {
             // 2^(attempt-1) * base, capped at 24 h
-            let factor: u64 = 1u64.saturating_shl((attempt - 1) as u32);
+            let factor: u64 = 1u64.checked_shl((attempt - 1) as u32).unwrap_or(0);
             now + (base.saturating_mul(factor)).min(86_400)
         } else {
             now + base
@@ -131,14 +131,14 @@ pub fn create_submission(
 /// Compute an acknowledgment ID from submission_id + received_at timestamp.
 pub fn compute_ack_id(env: &Env, submission_id: &BytesN<32>, received_at: u64) -> BytesN<32> {
     let mut buf = Bytes::new(env);
-    buf.append(&Bytes::from_slice(env, submission_id.as_ref()));
+    buf.append(&submission_id.to_bytes());
     buf.extend_from_array(&received_at.to_le_bytes());
-    env.crypto().sha256(&buf)
+    env.crypto().sha256(&buf).to_bytes()
 }
 
 /// Compute the hash of an acknowledgment payload for tamper-evidence.
 pub fn compute_ack_hash(env: &Env, payload: &Bytes) -> BytesN<32> {
-    env.crypto().sha256(payload)
+    env.crypto().sha256(payload).to_bytes()
 }
 
 /// Ingest a raw acknowledgment response from the authority's API.

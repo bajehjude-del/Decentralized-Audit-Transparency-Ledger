@@ -1,16 +1,17 @@
 #![no_std]
 
-use crate::cbdc_types::{CBDCPilot, CBDCTransaction, InteropProtocol};
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use crate::cbdc_types::{CBDCTransaction, InteropProtocol};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol};
+use soroban_sdk::xdr::ToXdr;
 
 /// Exchange rate between two CBDC pilots.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExchangeRate {
     /// Source CBDC pilot
-    pub source_pilot: u8, // CBDCPilot as u8
+    pub source_pilot: u32, // CBDCPilot as u8
     /// Destination CBDC pilot
-    pub dest_pilot: u8, // CBDCPilot as u8
+    pub dest_pilot: u32, // CBDCPilot as u8
     /// Rate scaled by 1e18 for precision
     pub rate: u128,
     /// Timestamp of rate (for staleness checks)
@@ -52,9 +53,9 @@ pub struct SettlementInstruction {
     /// Source transaction
     pub transaction: CBDCTransaction,
     /// Interoperability protocol
-    pub protocol: u8, // InteropProtocol as u8
+    pub protocol: u32, // InteropProtocol as u8
     /// Settlement status
-    pub status: u8, // SettlementStatus as u8
+    pub status: u32, // SettlementStatus as u8
     /// Settlement timestamp
     pub timestamp: u64,
     /// Confirmation hash from destination ledger
@@ -81,14 +82,14 @@ pub enum SettlementStatus {
 }
 
 impl SettlementStatus {
-    pub fn as_symbol(&self) -> Symbol {
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
         match self {
-            SettlementStatus::Created => Symbol::new(&[b"CREATED"]),
-            SettlementStatus::InitiatedSource => Symbol::new(&[b"INIT_SRC"]),
-            SettlementStatus::ConfirmedSource => Symbol::new(&[b"CONF_SRC"]),
-            SettlementStatus::AwaitingDestination => Symbol::new(&[b"AWAIT_DST"]),
-            SettlementStatus::Completed => Symbol::new(&[b"COMPLETE"]),
-            SettlementStatus::Failed => Symbol::new(&[b"FAILED"]),
+            SettlementStatus::Created => Symbol::new(env, "CREATED"),
+            SettlementStatus::InitiatedSource => Symbol::new(env, "INIT_SRC"),
+            SettlementStatus::ConfirmedSource => Symbol::new(env, "CONF_SRC"),
+            SettlementStatus::AwaitingDestination => Symbol::new(env, "AWAIT_DST"),
+            SettlementStatus::Completed => Symbol::new(env, "COMPLETE"),
+            SettlementStatus::Failed => Symbol::new(env, "FAILED"),
         }
     }
 
@@ -148,7 +149,7 @@ impl InteropManager {
         to: &Address,
         source_amount: u128,
         dest_amount: u128,
-        timeout_ledgers: u32,
+        _timeout_ledgers: u32,
     ) -> Result<BytesN<32>, &'static str> {
         if source_amount == 0 || dest_amount == 0 {
             return Err("Amounts cannot be zero");
@@ -156,12 +157,12 @@ impl InteropManager {
 
         // Generate swap ID
                 let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, from.to_xdr().as_ref()));
-        input.append(&Bytes::from_slice(env, to.to_xdr().as_ref()));
+        input.append(&from.to_xdr(env));
+        input.append(&to.to_xdr(env));
         input.append(&Bytes::from_slice(env, &source_amount.to_le_bytes()));
         input.append(&Bytes::from_slice(env, &dest_amount.to_le_bytes()));
 
-        Ok(env.crypto().sha256(&input))
+        Ok(env.crypto().sha256(&input).to_bytes())
     }
 
     /// Execute hub-and-spoke settlement
@@ -177,11 +178,11 @@ impl InteropManager {
 
         // Generate settlement ID
                 let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, hub_address.to_xdr().as_ref()));
+        input.append(&hub_address.to_xdr(env));
         input.append(&Bytes::from_slice(env, &source_amount.to_le_bytes()));
         input.append(&Bytes::from_slice(env, &dest_amount.to_le_bytes()));
 
-        Ok(env.crypto().sha256(&input))
+        Ok(env.crypto().sha256(&input).to_bytes())
     }
 
     /// Validate settlement instruction
@@ -251,7 +252,7 @@ impl InteropManager {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SettlementPath {
     /// Sequence of pilots in path (e.g., [EUR, USD, CNY])
-    pub path: soroban_sdk::Vec<u8>,
+    pub path: Bytes,
     /// Exchange rates for each hop
     pub rates: soroban_sdk::Vec<u128>,
     /// Total cost in basis points
@@ -270,7 +271,7 @@ impl SettlementPath {
 
         let mut amount = initial_amount;
         for rate in self.rates.iter() {
-            amount = InteropManager::convert_amount(amount, *rate)?;
+            amount = InteropManager::convert_amount(amount, rate)?;
         }
 
         Ok(amount)

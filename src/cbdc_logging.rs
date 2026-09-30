@@ -1,7 +1,7 @@
 #![no_std]
 
-use crate::cbdc_types::{CBDCPilot, CBDCTransaction, InteropProtocol, OfflineStatus, PrivacyTier};
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use crate::cbdc_types::{CBDCPilot, CBDCTransaction, InteropProtocol, PrivacyTier};
+use soroban_sdk::{contracttype, Bytes, Env, Symbol, Vec};
 
 /// Represents a CBDC transaction event logged to the audit trail.
 #[contracttype]
@@ -121,14 +121,19 @@ pub enum TransactionEventType {
 }
 
 impl TransactionEventType {
-    pub fn as_symbol(&self) -> Symbol {
+    /// Short on-chain code for this event type.
+    pub fn as_str(&self) -> &'static str {
         match self {
-            TransactionEventType::CrossCBDCTransfer => Symbol::new(&[b"XFER"]),
-            TransactionEventType::BatchSettlement => Symbol::new(&[b"BATCH"]),
-            TransactionEventType::ExchangeRateUpdate => Symbol::new(&[b"RATE"]),
-            TransactionEventType::Reconciliation => Symbol::new(&[b"RECON"]),
-            TransactionEventType::DisputeReversal => Symbol::new(&[b"DISPUTE"]),
+            TransactionEventType::CrossCBDCTransfer => "XFER",
+            TransactionEventType::BatchSettlement => "BATCH",
+            TransactionEventType::ExchangeRateUpdate => "RATE",
+            TransactionEventType::Reconciliation => "RECON",
+            TransactionEventType::DisputeReversal => "DISPUTE",
         }
+    }
+
+    pub fn as_symbol(&self, env: &Env) -> Symbol {
+        Symbol::new(env, self.as_str())
     }
 }
 
@@ -145,7 +150,7 @@ pub struct CBDCEventStats {
     /// Most recent transaction timestamp
     pub last_transaction_timestamp: u64,
     /// Events per CBDC pilot
-    pub events_per_pilot: soroban_sdk::Vec<(u8, u32)>, // (pilot_id, count)
+    pub events_per_pilot: soroban_sdk::Vec<(u32, u32)>, // (pilot_id, count)
 }
 
 impl CBDCEventStats {
@@ -195,7 +200,7 @@ impl CBDCLogger {
             event_index,
             timestamp,
             transaction,
-            event_type.as_symbol(),
+            event_type.as_symbol(env),
         )
     }
 
@@ -214,7 +219,7 @@ impl CBDCLogger {
             event_index,
             timestamp,
             transaction,
-            event_type.as_symbol(),
+            event_type.as_symbol(env),
             error_bytes,
         )
     }
@@ -237,14 +242,11 @@ impl CBDCLogger {
         metadata.append(&Bytes::from_slice(env, b":"));
 
         // Append protocol info
-        metadata.append(&Bytes::from_slice(env, protocol.as_symbol().to_string().as_bytes()));
+        metadata.append(&Bytes::from_slice(env, protocol.as_str().as_bytes()));
         metadata.append(&Bytes::from_slice(env, b":"));
 
         // Append privacy tier
-        metadata.append(&Bytes::from_slice(
-            env,
-            privacy_tier.as_symbol().to_string().as_bytes(),
-        ));
+        metadata.append(&Bytes::from_slice(env, privacy_tier.as_str().as_bytes()));
 
         metadata
     }
@@ -329,13 +331,7 @@ mod tests {
 
     #[test]
     fn test_transaction_event_type_conversions() {
-        assert_eq!(
-            TransactionEventType::CrossCBDCTransfer.as_symbol().to_string(),
-            "XFER"
-        );
-        assert_eq!(
-            TransactionEventType::BatchSettlement.as_symbol().to_string(),
-            "BATCH"
-        );
+        assert_eq!(TransactionEventType::CrossCBDCTransfer.as_str(), "XFER");
+        assert_eq!(TransactionEventType::BatchSettlement.as_str(), "BATCH");
     }
 }

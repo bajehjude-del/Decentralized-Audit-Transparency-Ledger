@@ -9,7 +9,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, Address, Bytes, BytesN, Env, Symbol,
-    Vec, panic_with_error, log,
+    Vec,
 };
 
 // ============================================================================

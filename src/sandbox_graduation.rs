@@ -1,7 +1,7 @@
 #![no_std]
 
 use crate::sandbox_types::*;
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{contracttype, Bytes, BytesN, Env};
 
 /// Graduation progress assessment.
 #[contracttype]
@@ -30,7 +30,7 @@ pub struct GraduationAssessment {
     /// Graduation eligible
     pub is_eligible: bool,
     /// Graduation decision (pending/approved/rejected)
-    pub decision: u8, // GraduationDecision as u8
+    pub decision: u32, // GraduationDecision as u32
     /// Graduation notes
     pub notes: Bytes,
 }
@@ -75,7 +75,7 @@ impl GraduationManager {
             financial_health_passed: false,
             tech_readiness_score: 0,
             is_eligible: false,
-            decision: GraduationDecision::Pending as u8,
+            decision: GraduationDecision::Pending as u32,
             notes: Bytes::new(env),
         }
     }
@@ -84,10 +84,10 @@ impl GraduationManager {
     pub fn compute_assessment_id(env: &Env, participant_id: &BytesN<32>) -> BytesN<32> {
         
         let mut input = Bytes::new(env);
-        input.append(&Bytes::from_slice(env, participant_id.as_ref()));
+        input.append(&participant_id.to_bytes());
         input.append(&Bytes::from_slice(env, b"GRADUATION"));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Evaluate graduation eligibility
@@ -135,7 +135,7 @@ impl GraduationManager {
             return Err("Participant does not meet graduation criteria");
         }
 
-        assessment.decision = GraduationDecision::Approved as u8;
+        assessment.decision = GraduationDecision::Approved as u32;
         assessment.notes = notes;
 
         Ok(())
@@ -146,7 +146,7 @@ impl GraduationManager {
         assessment: &mut GraduationAssessment,
         reason: Bytes,
     ) -> Result<(), &'static str> {
-        assessment.decision = GraduationDecision::Rejected as u8;
+        assessment.decision = GraduationDecision::Rejected as u32;
         assessment.notes = reason;
 
         Ok(())
@@ -157,7 +157,7 @@ impl GraduationManager {
         assessment: &mut GraduationAssessment,
         reason: Bytes,
     ) -> Result<(), &'static str> {
-        assessment.decision = GraduationDecision::Deferred as u8;
+        assessment.decision = GraduationDecision::Deferred as u32;
         assessment.notes = reason;
 
         Ok(())

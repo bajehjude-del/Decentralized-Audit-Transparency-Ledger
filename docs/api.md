@@ -50,6 +50,8 @@ pub struct EventHeader {          // lightweight view without metadata
 | 17 | `CapAlreadyRemoved` | Cap was already removed and cannot be removed again |
 | 18 | `CapNeverSet` | Attempted to remove a cap that was never set |
 
+See [Error Codes & Handling](#error-codes--handling) for HTTP/GraphQL/WebSocket mappings and retry guidance.
+
 ---
 
 ## Write Functions

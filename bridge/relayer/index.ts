@@ -102,6 +102,40 @@ function getHealthStatus(): HealthStatus {
   };
 }
 
+// ── Event Bus Integration (#413) ──────────────────────────────────────────────
+
+export interface EventBusPublisherLike {
+  publishContractEvent(raw: AuditEvent, correlationId?: string): Promise<void>;
+  publishRelayedEvent(raw: AuditEvent, evmTxHash: string, evmChainId?: string, correlationId?: string): Promise<void>;
+  publishSkippedEvent(raw: AuditEvent, reason: string, correlationId?: string): Promise<void>;
+  publishRelayError(error: Error | string, raw?: AuditEvent, correlationId?: string): Promise<void>;
+}
+
+let eventBusPublisher: EventBusPublisherLike | null = null;
+
+export function setEventBusPublisher(publisher: EventBusPublisherLike | null): void {
+  eventBusPublisher = publisher;
+}
+
+export function getEventBusPublisher(): EventBusPublisherLike | null {
+  return eventBusPublisher;
+}
+
+export function initEventBusPublisher(bus?: unknown): EventBusPublisherLike | null {
+  try {
+    // Dynamic load so bridge/relayer can run independently
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { createEventBus, createRelayerPublisher } = require("../../services/event-bus/src");
+    const activeBus = bus ?? createEventBus();
+    eventBusPublisher = createRelayerPublisher(activeBus);
+    console.log("[relayer] event bus publisher initialized");
+    return eventBusPublisher;
+  } catch (err) {
+    console.warn("[relayer] event bus module not available:", err);
+    return null;
+  }
+}
+
 // ── LRU Proof Cache (#142) ────────────────────────────────────────────────────
 
 interface CachedProof {
@@ -449,8 +483,17 @@ async function run(): Promise<void> {
       errorRecoveryManager.resolved(event.event_hash);
       // Issue #257: record the submission against the verification API
       await verificationStore.submit(event.event_hash, entry.proof!, verifyOnEvm);
+      if (eventBusPublisher) {
+        void eventBusPublisher.publishRelayedEvent(event, result);
+      }
       return result;
     } catch (err) {
+      if (eventBusPublisher) {
+        void eventBusPublisher.publishRelayError(
+          err instanceof Error ? err.message : String(err),
+          event,
+        );
+      }
       const decision = errorRecoveryManager.handle(event.event_hash, event, err);
       if (decision.shouldRetry) {
         console.warn(`[relayer] event #${event.index} failed, retrying (attempt ${decision.attempt}, delay ${decision.delayMs}ms)`);
@@ -460,6 +503,10 @@ async function run(): Promise<void> {
       throw err;
     }
   };
+
+  if (process.env.ENABLE_EVENT_BUS === "true" || process.env.EVENT_BUS_BACKEND) {
+    initEventBusPublisher();
+  }
 
   while (true) {
     try {
@@ -476,12 +523,21 @@ async function run(): Promise<void> {
       const { passed: events, rejected } = eventFilter.apply(rawEvents);
       if (rejected.length > 0) {
         console.log(`[relayer] filtered out ${rejected.length} event(s): ${rejected.map((r) => r.reason).join("; ")}`);
+        if (eventBusPublisher) {
+          for (const rej of rejected) {
+            void eventBusPublisher.publishSkippedEvent(rej.event, rej.reason);
+          }
+        }
       }
 
       for (const event of events) {
         console.log(
           `[relayer] processing event #${event.index} type=${event.event_type}`
         );
+
+        if (eventBusPublisher) {
+          void eventBusPublisher.publishContractEvent(event);
+        }
 
         // Deduplication check (#251) — skip events already submitted
         if (isDuplicate(event.event_hash)) {
@@ -527,6 +583,9 @@ async function run(): Promise<void> {
       }
     } catch (err) {
       console.error("[relayer] poll error:", err);
+      if (eventBusPublisher) {
+        void eventBusPublisher.publishRelayError(err instanceof Error ? err.message : String(err));
+      }
     }
 
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
@@ -590,4 +649,7 @@ export {
   VcSelectiveDisclosureRequest,
   createCredentialManager,
   createStandardEventSchema,
+  setEventBusPublisher,
+  getEventBusPublisher,
+  initEventBusPublisher,
 };

@@ -99,11 +99,14 @@ jobs:
         env:
           # SOURCE_DATE_EPOCH: deterministic timestamps in the build
           # Use the commit timestamp for reproducibility across re-runs.
-          SOURCE_DATE_EPOCH: ${{ github.event.head_commit.timestamp && '0' || '0' }}
+          SOURCE_DATE_EPOCH: "0"
           # Disable incremental compilation for reproducibility
           CARGO_INCREMENTAL: "0"
           # Prevent cargo from writing to the registry cache during build
           CARGO_NET_OFFLINE: "false"
+          # Deterministic build metadata
+          CARGO_TERM_COLOR: "never"
+          RUSTFLAGS: "--remap-path-prefix=${{ github.workspace }}=/build --remap-path-prefix=$HOME/.cargo=/cargo"
         run: |
           cargo clean
 
@@ -113,7 +116,9 @@ jobs:
             --target wasm32v1-none \
             --release \
             --locked \
-            --frozen
+            --frozen \
+            --config 'profile.release.debug=false' \
+            --config 'profile.release.strip="symbols"'
 
           WASM="target/wasm32v1-none/release/audit_ledger.wasm"
           echo "Build complete: $(stat --format='%s bytes' $WASM)"
@@ -140,6 +145,28 @@ jobs:
           cat wasm-checksums.txt
 
       # ── Verify WASM size ─────────────────────────────────────────────────
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          cargo install --locked cargo-cyclonedx --version 0.5.6
+          cargo cyclonedx --format json --output-cdx sbom.cdx.json
+          cargo cyclonedx --format xml --output-cdx sbom.cdx.xml
+
+      - name: Generate SBOM (SPDX)
+        run: |
+          cargo install --locked cargo-sbom --version 0.9.1
+          cargo sbom --output-format spdx_json_2_3 > sbom.spdx.json
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sboms
+          path: |
+            sbom.cdx.json
+            sbom.cdx.xml
+            sbom.spdx.json
+          retention-days: 30
+          if-no-files-found: error
+
       - name: Assert WASM ≤ 128 KB
         run: |
           WASM="target/wasm32v1-none/release/audit_ledger.wasm"
@@ -164,6 +191,26 @@ jobs:
         with:
           name: wasm-checksums
           path: wasm-checksums.txt
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Sign WASM with Sigstore cosign (keyless)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e560da # v3.7.0
+
+      - name: Cosign sign WASM artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cosign sign-blob --yes \
+            --bundle audit_ledger.wasm.sigstore.json \
+            target/wasm32v1-none/release/audit_ledger.wasm
+
+      - name: Upload Sigstore bundle
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wasm-sigstore-bundle
+          path: audit_ledger.wasm.sigstore.json
           retention-days: 30
           if-no-files-found: error
 
@@ -259,6 +306,24 @@ jobs:
             --source-uri "github.com/${{ github.repository }}" \
             --source-tag "${{ github.ref_name }}"
           echo "✓ SLSA provenance verified for audit_ledger.wasm"
+
+      - name: Download Sigstore bundle
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: wasm-sigstore-bundle
+          path: verify/
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e560da # v3.7.0
+
+      - name: Verify Sigstore signature
+        run: |
+          cosign verify-blob \
+            --bundle verify/audit_ledger.wasm.sigstore.json \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            verify/audit_ledger.wasm
+          echo "✓ Sigstore signature verified for audit_ledger.wasm"
 
       - name: Write verification summary
         run: |

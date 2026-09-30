@@ -46,6 +46,7 @@ from .batch import (
 from .cache import CacheConfig, CacheStats, LRUCache
 from .client import AuditLedgerClient
 from .models import Event, ContractError, RPCError, AuditLedgerError, Page
+from .crdt import CRDTOperation, EventCRDT
 from .async_client import AsyncAuditLedgerClient
 from .social_impact import (
     SocialImpactMetrics,
@@ -80,15 +81,40 @@ from .validation import (
     validate_event,
     BASE_EVENT_SCHEMA,
 )
+from .async_streaming import (
+    async_stream_events,
+    async_stream_by_type,
+    AsyncEventBatcher,
+)
+from .confidential import (
+    AccessControlPolicy,
+    AccessControlPolicyType,
+    ConfidentialEventPayload,
+    ConfidentialMetadataHelper,
+)
+
+
 
 __all__ = [
     # Sync client
     "AuditLedgerClient",
     # Async client (#242)
     "AsyncAuditLedgerClient",
+    # Async streaming & batching (#392)
+    "async_stream_events",
+    "async_stream_by_type",
+    "AsyncEventBatcher",
+    # Confidential metadata (#401)
+    "AccessControlPolicy",
+    "AccessControlPolicyType",
+    "ConfidentialEventPayload",
+    "ConfidentialMetadataHelper",
     # Models
     "Event",
     "Page",
+    # Contract event collaboration (issue #431)
+    "CRDTOperation",
+    "EventCRDT",
     # Exceptions (issue #249)
     "AuditLedgerError",
     "ContractError",

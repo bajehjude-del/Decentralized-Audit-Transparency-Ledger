@@ -1,7 +1,7 @@
 #![no_std]
 
 use crate::cbdc_types::{BatchSettlement, CBDCTransaction, OfflineStatus};
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contracttype, Bytes, BytesN, Env, Vec};
 
 /// Represents an offline-signed transaction before reconciliation.
 #[contracttype]
@@ -16,7 +16,7 @@ pub struct OfflineTransaction {
     /// Public key of signer
     pub signer_pubkey: Bytes,
     /// Reconciliation status
-    pub status: u8, // OfflineStatus as u8
+    pub status: u32, // OfflineStatus as u32
     /// Timestamp of offline creation
     pub created_at: u64,
     /// Timestamp of reconciliation (if any)
@@ -33,12 +33,12 @@ impl OfflineTransaction {
 
     /// Check if transaction is settled
     pub fn is_settled(&self) -> bool {
-        self.status == OfflineStatus::Reconciled as u8
+        self.status == OfflineStatus::Reconciled as u32
     }
 
     /// Check if transaction has failed
     pub fn is_failed(&self) -> bool {
-        self.status == OfflineStatus::FailedReconciliation as u8
+        self.status == OfflineStatus::FailedReconciliation as u32
     }
 }
 
@@ -112,7 +112,7 @@ impl OfflineManager {
             transaction,
             signature,
             signer_pubkey,
-            status: OfflineStatus::PendingReconciliation as u8,
+            status: OfflineStatus::PendingReconciliation as u32,
             created_at: env.ledger().timestamp(),
             reconciled_at: None,
             nonce,
@@ -129,10 +129,7 @@ impl OfflineManager {
         let mut input = Bytes::new(env);
 
         // Hash transaction fields
-        input.append(&Bytes::from_slice(
-            env,
-            transaction.tx_id.as_ref(),
-        ));
+        input.append(&transaction.tx_id.to_bytes());
         input.append(&Bytes::from_slice(env, &transaction.source_pilot.to_le_bytes()));
         input.append(&Bytes::from_slice(env, &transaction.dest_pilot.to_le_bytes()));
         input.append(&Bytes::from_slice(env, &transaction.amount_source.to_le_bytes()));
@@ -140,7 +137,7 @@ impl OfflineManager {
         input.append(&Bytes::from_slice(env, &transaction.exchange_rate.to_le_bytes()));
         input.append(&Bytes::from_slice(env, &nonce.to_le_bytes()));
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Validate offline transaction before reconciliation
@@ -165,12 +162,12 @@ impl OfflineManager {
         env: &Env,
         offline_tx: &mut OfflineTransaction,
     ) -> Result<(), &'static str> {
-        if offline_tx.status != OfflineStatus::PendingReconciliation as u8 {
+        if offline_tx.status != OfflineStatus::PendingReconciliation as u32 {
             return Err("Transaction is not in pending state");
         }
 
         // Mark as reconciled
-        offline_tx.status = OfflineStatus::Reconciled as u8;
+        offline_tx.status = OfflineStatus::Reconciled as u32;
         offline_tx.reconciled_at = Some(env.ledger().timestamp());
 
         Ok(())
@@ -181,11 +178,11 @@ impl OfflineManager {
         env: &Env,
         offline_tx: &mut OfflineTransaction,
     ) -> Result<(), &'static str> {
-        if offline_tx.status == OfflineStatus::Reconciled as u8 {
+        if offline_tx.status == OfflineStatus::Reconciled as u32 {
             return Err("Cannot fail already reconciled transaction");
         }
 
-        offline_tx.status = OfflineStatus::FailedReconciliation as u8;
+        offline_tx.status = OfflineStatus::FailedReconciliation as u32;
         offline_tx.reconciled_at = Some(env.ledger().timestamp());
 
         Ok(())
@@ -210,7 +207,7 @@ impl OfflineManager {
             batch_id,
             transaction_ids: tx_ids,
             total_amount,
-            settlement_status: OfflineStatus::PendingReconciliation as u8,
+            settlement_status: OfflineStatus::PendingReconciliation as u32,
             created_at: env.ledger().timestamp(),
             settled_at: None,
         })
@@ -222,10 +219,10 @@ impl OfflineManager {
         let mut input = Bytes::new(env);
 
         for tx_id in tx_ids.iter() {
-            input.append(&Bytes::from_slice(env, tx_id.as_ref()));
+            input.append(&tx_id.to_bytes());
         }
 
-        env.crypto().sha256(&input)
+        env.crypto().sha256(&input).to_bytes()
     }
 
     /// Settle batch on-chain
@@ -233,11 +230,11 @@ impl OfflineManager {
         env: &Env,
         batch: &mut BatchSettlement,
     ) -> Result<(), &'static str> {
-        if batch.settlement_status != OfflineStatus::PendingReconciliation as u8 {
+        if batch.settlement_status != OfflineStatus::PendingReconciliation as u32 {
             return Err("Batch is not in pending state");
         }
 
-        batch.settlement_status = OfflineStatus::Reconciled as u8;
+        batch.settlement_status = OfflineStatus::Reconciled as u32;
         batch.settled_at = Some(env.ledger().timestamp());
 
         Ok(())
@@ -256,17 +253,17 @@ impl OfflineManager {
 
     /// Compute reconciliation state from transaction statuses
     pub fn compute_reconciliation_state(
-        statuses: &Vec<u8>,
+        statuses: &Vec<u32>,
     ) -> ReconciliationState {
         let mut state = ReconciliationState::new();
         state.total_transactions = statuses.len() as u32;
 
         for status in statuses.iter() {
-            match *status {
-                s if s == OfflineStatus::Reconciled as u8 => state.successful_count += 1,
-                s if s == OfflineStatus::FailedReconciliation as u8 => state.failed_count += 1,
-                s if s == OfflineStatus::PendingReconciliation as u8 => state.pending_count += 1,
-                s if s == OfflineStatus::Disputed as u8 => state.disputed_count += 1,
+            match status {
+                s if s == OfflineStatus::Reconciled as u32 => state.successful_count += 1,
+                s if s == OfflineStatus::FailedReconciliation as u32 => state.failed_count += 1,
+                s if s == OfflineStatus::PendingReconciliation as u32 => state.pending_count += 1,
+                s if s == OfflineStatus::Disputed as u32 => state.disputed_count += 1,
                 _ => {}
             }
         }
@@ -322,7 +319,7 @@ impl ReconciliationQueue {
     }
 
     pub fn clear(&mut self, timestamp: u64) {
-        self.pending_tx_hashes.clear();
+        self.pending_tx_hashes = Vec::new(self.pending_tx_hashes.env());
         self.last_flush_time = timestamp;
     }
 }
@@ -352,7 +349,7 @@ mod tests {
             },
             signature: Bytes::new(&soroban_sdk::Env::default()),
             signer_pubkey: Bytes::new(&soroban_sdk::Env::default()),
-            status: OfflineStatus::PendingReconciliation as u8,
+            status: OfflineStatus::PendingReconciliation as u32,
             created_at: 1000,
             reconciled_at: None,
             nonce: 1,
@@ -367,9 +364,9 @@ mod tests {
         let statuses = Vec::from_array(
             &soroban_sdk::Env::default(),
             &[
-                OfflineStatus::Reconciled as u8,
-                OfflineStatus::Reconciled as u8,
-                OfflineStatus::FailedReconciliation as u8,
+                OfflineStatus::Reconciled as u32,
+                OfflineStatus::Reconciled as u32,
+                OfflineStatus::FailedReconciliation as u32,
             ],
         );
 

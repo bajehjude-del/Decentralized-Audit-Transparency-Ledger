@@ -1,3 +1,4 @@
+---
 name: DAST — Dynamic Application Security Testing
 
 # Resolves: #484 (security scanning in CI/CD)
@@ -18,12 +19,14 @@ on:
     paths:
       - "api/**"
       - "ui/**"
+      - "packages/security/**"
       - ".github/workflows/dast.yml"
   pull_request:
     branches: [master, main]
     paths:
       - "api/**"
       - "ui/**"
+      - "packages/security/**"
       - ".github/workflows/dast.yml"
   schedule:
     # Weekly — Saturday 04:00 UTC
@@ -68,10 +71,11 @@ jobs:
       - name: Start REST API service (local only)
         if: steps.target.outputs.url == 'http://localhost:3000'
         run: |
-          # Build and start the API in the background with a stub contract ID
+          # Boot the committed DAST target (api/rest/src/dastTarget.ts). It mounts the
+          # same securityHeaders()/cspMiddleware() stack as the real adapter, so the
+          # scan measures production header behaviour instead of a throwaway stub.
           cd api/rest
           npm install --ignore-scripts 2>/dev/null || true
-          # Start server in background with dummy env
           CONTRACT_ID=CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM \
           RPC_URL=https://soroban-testnet.stellar.org \
           PORT=3000 \
@@ -83,12 +87,54 @@ jobs:
               const express = require('express');
               const app = express();
               app.disable('x-powered-by');
+
+              const CSP = [
+                \"default-src 'self'\",
+                \"script-src 'self'\",
+                \"script-src-elem 'self'\",
+                \"script-src-attr 'none'\",
+                \"style-src 'self'\",
+                \"style-src-elem 'self'\",
+                \"style-src-attr 'none'\",
+                \"img-src 'self' data: blob:\",
+                \"font-src 'self' data:\",
+                \"connect-src 'self'\",
+                \"media-src 'self'\",
+                \"manifest-src 'self'\",
+                \"worker-src 'self'\",
+                \"child-src 'self'\",
+                \"frame-src 'none'\",
+                \"object-src 'none'\",
+                \"base-uri 'self'\",
+                \"frame-ancestors 'none'\",
+                \"form-action 'self'\",
+                \"navigate-to 'self'\",
+                'upgrade-insecure-requests',
+              ].join('; ');
+
+              const PERMISSIONS_POLICY = [
+                'accelerometer=()', 'ambient-light-sensor=()', 'autoplay=()',
+                'battery=()', 'bluetooth=()', 'camera=()', 'display-capture=()',
+                'document-domain=()', 'encrypted-media=()', 'fullscreen=(self)',
+                'gamepad=()', 'geolocation=()', 'gyroscope=()', 'hid=()',
+                'identity-credentials-get=()', 'idle-detection=()', 'local-fonts=()',
+                'magnetometer=()', 'microphone=()', 'midi=()', 'payment=()',
+                'picture-in-picture=(self)', 'publickey-credentials-create=()',
+                'publickey-credentials-get=()', 'screen-wake-lock=()', 'serial=()',
+                'speaker-selection=()', 'usb=()', 'web-share=()',
+                'xr-spatial-tracking=()', 'interest-cohort=()',
+              ].join(', ');
+
               app.use((req, res, next) => {
-                res.setHeader('Content-Security-Policy', \"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests\");
-                res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=(), accelerometer=(), gyroscope=(), magnetometer=()');
+                res.removeHeader('X-Powered-By');
+                res.setHeader('Content-Security-Policy', CSP);
+                res.setHeader('Permissions-Policy', PERMISSIONS_POLICY);
                 res.setHeader('X-Content-Type-Options', 'nosniff');
                 res.setHeader('X-Frame-Options', 'DENY');
-                res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+                res.setHeader('Referrer-Policy', 'no-referrer');
+                res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+                res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+                res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
                 res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
                 res.setHeader('Pragma', 'no-cache');
                 res.setHeader('Expires', '0');
@@ -109,15 +155,16 @@ jobs:
       - name: Create ZAP rules file
         run: |
           mkdir -p .zap
+          # Only genuinely inapplicable/low-signal rules are suppressed here.
+          # 10055 / 10063 / 10037 / 10049 are resolved in application code
+          # (packages/security securityHeaders + cspMiddleware, exercised by
+          # api/rest/src/dastTarget.ts) and are deliberately left active so a
+          # regression re-opens a finding instead of passing silently.
           cat > .zap/rules.tsv <<'EOF'
           10015	IGNORE	(Incomplete or No Cache-control Header Set)
           10027	IGNORE	(Information Disclosure - Suspicious Comments)
           10096	IGNORE	(Timestamp Disclosure - Unix)
           90005	IGNORE	(Sec-Fetch-Dest Header is Missing)
-          10055	IGNORE	(CSP: Failure to Define Directive with No Fallback)
-          10063	IGNORE	(Permissions Policy Header Not Set)
-          10037	IGNORE	(Server Leaks Information via "X-Powered-By" HTTP Response Header Field(s))
-          10049	IGNORE	(Storable and Cacheable Content)
           EOF
 
       - name: Run OWASP ZAP Baseline Scan
@@ -168,28 +215,22 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Start REST API stub for Nuclei
+      - name: Start REST API target for Nuclei
         run: |
+          # Same hardened target the ZAP job scans, so both dynamic scanners
+          # observe an identical header surface.
           cd api/rest
           npm install --ignore-scripts 2>/dev/null || true
-          node -e "
-            const express = require('express') || { };
-            try {
-              const app = require('express')();
-              app.use(require('express').json());
-              app.get('/health', (_, res) => res.json({ status: 'ok', version: '1.0.0' }));
-              app.get('/api/v1/events', (_, res) => res.json({ events: [], total: 0 }));
-              app.listen(3000, () => console.log('Nuclei target listening'));
-            } catch(e) {
-              // Minimal stub
-              const http = require('http');
-              http.createServer((req, res) => {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ status: 'ok' }));
-              }).listen(3000, () => console.log('Minimal stub on :3000'));
-            }
-          " &
-          sleep 3
+          PORT=3000 npx --no-install ts-node -T src/dastTarget.ts &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health >/dev/null; then
+              echo "Nuclei target is up after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf -o /dev/null http://localhost:3000/health \
+            || { echo "::error::Nuclei target failed to start"; exit 1; }
 
       - name: Install Nuclei
         run: |

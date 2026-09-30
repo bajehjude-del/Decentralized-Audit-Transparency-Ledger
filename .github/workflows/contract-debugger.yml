@@ -89,4 +89,4 @@ jobs:
         # developer's editor.  Each request waits for its own response instead of
         # racing a timer, so this cannot flake on a slow runner.
         working-directory: tools/contract-debugger
-        run: node tools/contract-debugger/test/dap-exchange.check.js
+        run: node test/dap-exchange.check.js

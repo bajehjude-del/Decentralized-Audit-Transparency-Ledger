@@ -2,15 +2,37 @@
 name = "audit-ledger"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.81"
+license = "Apache-2.0"
+repository = "https://github.com/example/audit-ledger"
+publish = false
 
 [lib]
 crate-type = ["cdylib", "lib"]
 
+[features]
+# `AuditLedger` is the deployed contract; a Soroban WASM exposes a single contract
+# interface, so the other standalone contracts in this crate are opt-in and are
+# always compiled into host test builds.
+contract-event-privacy = []
+privacy-analytics = []
+data-governance = []
+multi-tenant = []
+# Enables the SDK testutils codegen for this crate's own types.
+testutils = ["soroban-sdk/testutils"]
+
+# The contract is the workspace root; `bench/` hosts the contract benchmarking
+# suite (`cargo bench -p audit-ledger-bench`). It is a separate package so the
+# heavy integration-test dev-dependencies below are never built for benchmarks.
+[workspace]
+members = ["bench"]
+resolver = "2"
+
 [dependencies]
-soroban-sdk = "27.0.6"
+soroban-sdk = "28.0.0"
 
 [dev-dependencies]
-soroban-sdk = { version = "27.0.6", features = ["testutils"] }
+soroban-sdk = { version = "28.0.0", features = ["testutils"] }
 rand = "0.10"
 proptest = "1"
 
@@ -47,11 +69,6 @@ pulsar = { version = "6.3.1", default-features = false, features = [
     "auth-oauth2",
 ] }
 
-# Schema registry client (Confluent-compatible, used for Kafka/Pulsar schema management)
-schema-registry-client = { version = "0.12.0", default-features = false, features = [
-    "rustls-tls",
-] }
-
 # HTTP client for Soroban RPC mock calls
 reqwest = { version = "0.12.0", default-features = false, features = [
     "json",
@@ -77,3 +94,31 @@ overflow-checks = true
 lto = true
 debug = 0
 strip = "symbols"
+codegen-units = 1
+panic = "abort"
+incremental = false
+trim-paths = "all"
+
+# Reproducible build profile for CI artifact verification
+[profile.reproducible]
+inherits = "release"
+codegen-units = 1
+incremental = false
+trim-paths = "all"
+debug = 0
+strip = "symbols"
+panic = "abort"
+lto = "fat"
+
+# Deterministic source replacement for supply-chain verification
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"
+
+[net]
+offline = true
+
+[patch.crates-io]
+soroban-sdk = { version = "27.0.6" }

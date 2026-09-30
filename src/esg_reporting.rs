@@ -258,6 +258,43 @@ pub fn collect_governance_data(
     }
 }
 
+/// Append a decimal `u32` to `out` without `format!` (no guest allocator in wasm).
+fn push_decimal(out: &mut Bytes, mut v: u32) {
+    if v == 0 {
+        out.push_back(b'0');
+        return;
+    }
+    let mut digits: [u8; 10] = [0u8; 10];
+    let mut n = 0usize;
+    while v > 0 {
+        digits[n] = b'0' + (v % 10) as u8;
+        v /= 10;
+        n += 1;
+    }
+    while n > 0 {
+        n -= 1;
+        out.push_back(digits[n]);
+    }
+}
+
+/// Build `prefix` + space-separated decimal values into a `Bytes` message.
+fn message_with(env: &Env, prefix: &[u8], values: &[u32]) -> Bytes {
+    let mut msg = Bytes::from_slice(env, prefix);
+    for v in values {
+        msg.push_back(b' ');
+        push_decimal(&mut msg, *v);
+    }
+    msg
+}
+
+/// Preimage for ESG report IDs: strkey bytes + little-endian period/timestamp.
+fn esg_report_preimage(env: &Env, organization: &Address, period_start: u64) -> Bytes {
+    let mut preimage = organization.to_string().to_bytes();
+    preimage.extend_from_slice(&period_start.to_le_bytes());
+    preimage.extend_from_slice(&env.ledger().timestamp().to_le_bytes());
+    preimage
+}
+
 /// Generate main ESG report
 pub fn generate_esg_report(
     env: &Env,
@@ -271,11 +308,8 @@ pub fn generate_esg_report(
     organization.require_auth();
 
     let report_id = env.crypto().sha256(
-        &Bytes::from_slice(
-            &env,
-            format!("{}{}{}", organization.to_string(), period_start, env.ledger().timestamp()).as_bytes(),
-        )
-    );
+        &esg_report_preimage(&env, &organization, period_start)
+    ).to_bytes();
 
     let e_score = (environmental.renewable_energy_percent + environmental.energy_efficiency_score) / 2;
     let s_score = (social.women_percent + social.employee_satisfaction) / 2;
@@ -318,7 +352,7 @@ pub fn generate_esg_report(
 
 /// Calculate ESG score
 pub fn calculate_esg_score(
-    env: &Env,
+    _env: &Env,
     e_metrics: &EnvironmentalMetrics,
     s_metrics: &SocialMetrics,
     g_metrics: &GovernanceMetrics,
@@ -430,7 +464,7 @@ pub fn align_to_tcfd(
 }
 
 /// Verify framework alignment
-pub fn verify_alignment(env: &Env, alignment: &FrameworkAlignment) -> bool {
+pub fn verify_alignment(_env: &Env, alignment: &FrameworkAlignment) -> bool {
     alignment.aligned && alignment.coverage_percent >= 80
 }
 
@@ -438,7 +472,7 @@ pub fn verify_alignment(env: &Env, alignment: &FrameworkAlignment) -> bool {
 pub fn generate_investor_report(
     env: &Env,
     report_id: BytesN<32>,
-    organization: Address,
+    _organization: Address,
 ) -> StakeholderReport {
     let report: ESGReport = env
         .storage()
@@ -446,14 +480,15 @@ pub fn generate_investor_report(
         .get(&ESGDataKey::ESGReport(report_id.clone()))
         .unwrap_or_else(|| panic!("Report not found"));
 
-    let investor_id = env.crypto().sha256(&Bytes::from_slice(&env, b"INVESTOR"));
-    let content = Bytes::from_slice(
+    let investor_id = env.crypto().sha256(&Bytes::from_slice(&env, b"INVESTOR")).to_bytes();
+    let content = message_with(
         &env,
-        format!("ESG Score: {}, E: {}, S: {}, G: {}", report.esg_score, report.e_score, report.s_score, report.g_score).as_bytes()
+        b"ESG Score:",
+        &[report.esg_score, report.e_score, report.s_score, report.g_score],
     );
 
     let stakeholder_report = StakeholderReport {
-        report_id: investor_id,
+        report_id: investor_id.clone(),
         stakeholder_type: StakeholderType::Investor,
         content,
         esg_score: report.esg_score,
@@ -472,7 +507,7 @@ pub fn generate_investor_report(
 pub fn generate_employee_report(
     env: &Env,
     report_id: BytesN<32>,
-    organization: Address,
+    _organization: Address,
 ) -> StakeholderReport {
     let report: ESGReport = env
         .storage()
@@ -480,14 +515,15 @@ pub fn generate_employee_report(
         .get(&ESGDataKey::ESGReport(report_id.clone()))
         .unwrap_or_else(|| panic!("Report not found"));
 
-    let employee_id = env.crypto().sha256(&Bytes::from_slice(&env, b"EMPLOYEE"));
-    let content = Bytes::from_slice(
+    let employee_id = env.crypto().sha256(&Bytes::from_slice(&env, b"EMPLOYEE")).to_bytes();
+    let content = message_with(
         &env,
-        format!(
-            "Social Score: {}, Women: {}%, Training: {} hours",
-            report.s_score, report.social.women_percent, report.social.training_hours_per_employee
-        )
-        .as_bytes()
+        b"Social Score:",
+        &[
+            report.s_score,
+            report.social.women_percent,
+            report.social.training_hours_per_employee,
+        ],
     );
 
     StakeholderReport {
@@ -504,7 +540,7 @@ pub fn generate_employee_report(
 pub fn generate_supplier_report(
     env: &Env,
     report_id: BytesN<32>,
-    organization: Address,
+    _organization: Address,
 ) -> StakeholderReport {
     let report: ESGReport = env
         .storage()
@@ -512,11 +548,11 @@ pub fn generate_supplier_report(
         .get(&ESGDataKey::ESGReport(report_id.clone()))
         .unwrap_or_else(|| panic!("Report not found"));
 
-    let supplier_id = env.crypto().sha256(&Bytes::from_slice(&env, b"SUPPLIER"));
-    let content = Bytes::from_slice(
+    let supplier_id = env.crypto().sha256(&Bytes::from_slice(&env, b"SUPPLIER")).to_bytes();
+    let content = message_with(
         &env,
-        format!("Governance Score: {}, Ethics: {}%", report.g_score, report.governance.ethics_training_percent)
-            .as_bytes()
+        b"Governance Score:",
+        &[report.g_score, report.governance.ethics_training_percent],
     );
 
     StakeholderReport {
@@ -533,7 +569,7 @@ pub fn generate_supplier_report(
 pub fn generate_community_report(
     env: &Env,
     report_id: BytesN<32>,
-    organization: Address,
+    _organization: Address,
 ) -> StakeholderReport {
     let report: ESGReport = env
         .storage()
@@ -541,14 +577,11 @@ pub fn generate_community_report(
         .get(&ESGDataKey::ESGReport(report_id.clone()))
         .unwrap_or_else(|| panic!("Report not found"));
 
-    let community_id = env.crypto().sha256(&Bytes::from_slice(&env, b"COMMUNITY"));
-    let content = Bytes::from_slice(
+    let community_id = env.crypto().sha256(&Bytes::from_slice(&env, b"COMMUNITY")).to_bytes();
+    let content = message_with(
         &env,
-        format!(
-            "Environmental Score: {}, Community Investment: ${} K",
-            report.e_score, report.social.community_investment
-        )
-        .as_bytes()
+        b"Environmental Score:",
+        &[report.e_score, report.social.community_investment as u32],
     );
 
     StakeholderReport {
@@ -602,7 +635,7 @@ pub fn trend_analysis(
 
 /// Validate metrics
 pub fn validate_metrics(
-    env: &Env,
+    _env: &Env,
     environmental: &EnvironmentalMetrics,
     social: &SocialMetrics,
     governance: &GovernanceMetrics,

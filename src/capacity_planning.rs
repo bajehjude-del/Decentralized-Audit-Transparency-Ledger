@@ -61,7 +61,7 @@ pub struct QuotaTier {
     pub max_burst_tps: u32,
     pub storage_quota_bytes: u64,
     pub max_batch_size: u32,
-    pub cost_per_million_events_stroops: u64,
+    pub cost_per_m_events_stroops: u64,
 }
 
 #[contracttype]
@@ -212,7 +212,7 @@ impl CapacityPlanning {
             max_burst_tps: 50,
             storage_quota_bytes: 1_000_000_000,
             max_batch_size: 100,
-            cost_per_million_events_stroops: 5_000_000,
+            cost_per_m_events_stroops: 5_000_000,
         });
 
         let now = env.ledger().timestamp();
@@ -230,7 +230,7 @@ impl CapacityPlanning {
         }
 
         sub_record.events_in_current_window += event_count as u64;
-        let batch_cost = ((event_count as u64) * tier.cost_per_million_events_stroops) / 1_000_000;
+        let batch_cost = ((event_count as u64) * tier.cost_per_m_events_stroops) / 1_000_000;
         sub_record.total_cost_billed_stroops += batch_cost;
 
         env.storage().persistent().set(&sub_key, &sub_record);

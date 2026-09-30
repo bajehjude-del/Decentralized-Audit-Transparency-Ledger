@@ -148,8 +148,8 @@ pub struct VATDetermination {
     pub vat_rate: u32,
     /// Is supply exempt
     pub is_exempt: bool,
-    /// Exemption reason if applicable
-    pub exemption_reason: Option<VATExemptionReason>,
+    /// Exemption reason (VATExemptionReason::None when not exempt)
+    pub exemption_reason: VATExemptionReason,
     /// Is reverse charge applicable
     pub reverse_charge_applicable: bool,
     /// Place of supply
@@ -466,3 +466,4 @@ mod tests {
         assert!(VATExemptionReason::Financial < VATExemptionReason::Healthcare);
     }
 }
+

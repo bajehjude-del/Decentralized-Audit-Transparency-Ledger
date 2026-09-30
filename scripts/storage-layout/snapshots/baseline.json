@@ -1,0 +1,737 @@
+{
+  "version": 1,
+  "contract": "AuditLedger",
+  "generated_at": "2026-09-27T05:00:00Z",
+  "git_commit": "initial-baseline",
+  "rust_toolchain": "stable",
+  "variants": [
+    {
+      "ordinal": 0,
+      "name": "Owner",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 1,
+      "name": "Config",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 2,
+      "name": "GlobalMaxLogs",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": true,
+      "comment": "Replaced by Config — kept as tombstone variant so existing encoded keys don't collide; no longer written."
+    },
+    {
+      "ordinal": 3,
+      "name": "Paused",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Paused flag: when true, write operations are blocked."
+    },
+    {
+      "ordinal": 4,
+      "name": "SubmitterBlocklist",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Address" }
+      ],
+      "tombstone": false,
+      "comment": "Blocked submitters cannot submit events (issue #141)."
+    },
+    {
+      "ordinal": 5,
+      "name": "AllowlistMode",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "If true, allowlist mode is enabled (issue #141)."
+    },
+    {
+      "ordinal": 6,
+      "name": "SubmitterAllowlist",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Address" }
+      ],
+      "tombstone": false,
+      "comment": "Per-submitter allowlist state (issue #141)."
+    },
+    {
+      "ordinal": 7,
+      "name": "TotalEvents",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": true,
+      "comment": "Replaced by Config — kept as tombstone variant."
+    },
+    {
+      "ordinal": 8,
+      "name": "EventCapSet",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": true,
+      "comment": "Replaced by EventCapConfig(Symbol) — kept as tombstone variant."
+    },
+    {
+      "ordinal": 9,
+      "name": "EventMaxLogs",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": true,
+      "comment": "Replaced by EventCapConfig(Symbol) — kept as tombstone variant."
+    },
+    {
+      "ordinal": 10,
+      "name": "EventCapRemoved",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 11,
+      "name": "EventCapConfig",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 12,
+      "name": "EventTypeIndices",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": false,
+      "comment": "Stores packed Bytes of u32 global-order indices (4 bytes each, LE) for a type (issue #54)."
+    },
+    {
+      "ordinal": 13,
+      "name": "SubmitterEventIndices",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Address" }
+      ],
+      "tombstone": false,
+      "comment": "Stores packed Bytes of u32 global-order indices (4 bytes each, LE) for a submitter (issue #206)."
+    },
+    {
+      "ordinal": 14,
+      "name": "SubmitterEventCount",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Address" }
+      ],
+      "tombstone": false,
+      "comment": "Cached event count per submitter (issue #206)."
+    },
+    {
+      "ordinal": 15,
+      "name": "EventData",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "Primary storage: event ID → Event."
+    },
+    {
+      "ordinal": 16,
+      "name": "EventOrder",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "u32" }
+      ],
+      "tombstone": false,
+      "comment": "Sequential index → event ID, for ordered retrieval."
+    },
+    {
+      "ordinal": 17,
+      "name": "EventMetadataMaxSize",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": false,
+      "comment": "Per-event-type metadata size cap (issue #67). Absent = use global default."
+    },
+    {
+      "ordinal": 18,
+      "name": "GlobalMetadataMaxSize",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Global metadata size cap (issue #67). Absent = DEFAULT_MAX_METADATA_SIZE."
+    },
+    {
+      "ordinal": 19,
+      "name": "MetadataSchema",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": false,
+      "comment": "Per-event-type metadata validation schema (issue #202). Absent = no schema constraint."
+    },
+    {
+      "ordinal": 20,
+      "name": "EventSchema",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" },
+        { "position": 1, "name": null, "type": "u32" }
+      ],
+      "tombstone": false,
+      "comment": "Versioned schema registry entry for a specific event type and schema version."
+    },
+    {
+      "ordinal": 21,
+      "name": "SchemaVersions",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": false,
+      "comment": "Registered schema versions keyed by event type."
+    },
+    {
+      "ordinal": 22,
+      "name": "EventSchemaMigration",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" },
+        { "position": 1, "name": null, "type": "u32" },
+        { "position": 2, "name": null, "type": "u32" }
+      ],
+      "tombstone": false,
+      "comment": "Migration function for metadata updates between schema versions."
+    },
+    {
+      "ordinal": 23,
+      "name": "RuntimeState",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Cached full runtime state for fast reads."
+    },
+    {
+      "ordinal": 24,
+      "name": "EventSignature",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "Signature stored for an event (issue #69): (pubkey, signature)."
+    },
+    {
+      "ordinal": 25,
+      "name": "EventTypeCount",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": false,
+      "comment": "Cached event count per type (issue #52). Updated alongside EventTypeIndices."
+    },
+    {
+      "ordinal": 26,
+      "name": "EventHeaderKey",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "Lightweight header (issue #56): EventHeader stored separately from metadata."
+    },
+    {
+      "ordinal": 27,
+      "name": "EventMeta",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "Optimized storage for event headers (issue #53): (index, timestamp, event_type, submitter)."
+    },
+    {
+      "ordinal": 28,
+      "name": "EventMetadata",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "Optimized storage for event metadata alone (issue #53)."
+    },
+    {
+      "ordinal": 29,
+      "name": "EventVersions",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "u32" }
+      ],
+      "tombstone": false,
+      "comment": "Stored update history for events indexed by event order."
+    },
+    {
+      "ordinal": 30,
+      "name": "EventEmissionConfig",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Event emission configuration (issue #60): 0=full, 1=index-only, 2=hash-only, 3=none."
+    },
+    {
+      "ordinal": 31,
+      "name": "EventEmissionVersion",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Event emission version (issue #60): 1=full metadata, 2=index-only."
+    },
+    {
+      "ordinal": 32,
+      "name": "LowCostMode",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Low-cost mode configuration (issue #57): 0=normal, 1=low-cost."
+    },
+    {
+      "ordinal": 33,
+      "name": "SubmitterRateLimit",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Address" }
+      ],
+      "tombstone": false,
+      "comment": "Rate limit (max events per ledger timestamp) for a submitter (issue #62). 0 = blocked."
+    },
+    {
+      "ordinal": 34,
+      "name": "SubmitterRateState",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Address" }
+      ],
+      "tombstone": false,
+      "comment": "Rate-limit state (last_timestamp, count) per submitter (issue #62)."
+    },
+    {
+      "ordinal": 35,
+      "name": "SubmitterNonce",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Address" }
+      ],
+      "tombstone": false,
+      "comment": "Per-submitter nonce for replay-attack prevention (issue #64). Stores the last accepted nonce; absent means no event submitted yet (treat as 0)."
+    },
+    {
+      "ordinal": 36,
+      "name": "SubmitterNonceConfig",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Address" }
+      ],
+      "tombstone": false,
+      "comment": "Packed nonce state per submitter (issue #214): window_size, max_nonce."
+    },
+    {
+      "ordinal": 37,
+      "name": "DefaultNonceWindowSize",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Global default nonce window size (issue #214)."
+    },
+    {
+      "ordinal": 38,
+      "name": "DefaultNonceMaxValue",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Global maximum nonce value before exhaustion (issue #214)."
+    },
+    {
+      "ordinal": 39,
+      "name": "ArchivedTotalEvents",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 40,
+      "name": "ArchivedEventData",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 41,
+      "name": "ArchivedEventHeaderKey",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 42,
+      "name": "ArchivedEventMetadata",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 43,
+      "name": "ArchivedEventArchivedFlag",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 44,
+      "name": "ArchivedEventOrder",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "u32" }
+      ],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 45,
+      "name": "EventArchivedFlag",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 46,
+      "name": "Owners",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 47,
+      "name": "RequiredSignatures",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 48,
+      "name": "ProposalCount",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 49,
+      "name": "Proposal",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "u32" }
+      ],
+      "tombstone": false,
+      "comment": ""
+    },
+    {
+      "ordinal": 50,
+      "name": "EventTtl",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "TTL configuration (#121): number of ledgers after which persistent events are eligible for expiry. Absent = TTL disabled (instance storage, no expiry)."
+    },
+    {
+      "ordinal": 51,
+      "name": "ContractVersion",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Contract version marker."
+    },
+    {
+      "ordinal": 52,
+      "name": "EventContentHash",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "Content-addressed dedup hash → event index."
+    },
+    {
+      "ordinal": 53,
+      "name": "CategoryMaxLen",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Max category symbol byte length."
+    },
+    {
+      "ordinal": 54,
+      "name": "LogEventReentrancyGuard",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Reentrancy guard marker (issue #61)."
+    },
+    {
+      "ordinal": 55,
+      "name": "PausedSince",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Timestamp when the contract was paused (issue #78)."
+    },
+    {
+      "ordinal": 56,
+      "name": "PauseConfig",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Granular pause configuration (issue #415)."
+    },
+    {
+      "ordinal": 57,
+      "name": "PauseReason",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Reason string for pause (issue #415)."
+    },
+    {
+      "ordinal": 58,
+      "name": "PauseMetadata",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Arbitrary metadata for pause (issue #415)."
+    },
+    {
+      "ordinal": 59,
+      "name": "PauseExpiration",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Expiration timestamp for auto-unpause (issue #415)."
+    },
+    {
+      "ordinal": 60,
+      "name": "WebhookRegistrations",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": false,
+      "comment": "Webhook registrations (#25): per-event-type list of (url, secret) pairs. Owner-only."
+    },
+    {
+      "ordinal": 61,
+      "name": "SnapshotCount",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Snapshot count — total snapshots created (issue #213)."
+    },
+    {
+      "ordinal": 62,
+      "name": "SnapshotData",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "u32" }
+      ],
+      "tombstone": false,
+      "comment": "Individual snapshot data keyed by snapshot index (issue #213)."
+    },
+    {
+      "ordinal": 63,
+      "name": "TtlCleanupStats",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Cumulative TTL cleanup statistics (issue #200)."
+    },
+    {
+      "ordinal": 64,
+      "name": "ArchiveScanCursor",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Resume cursor for archive_events scans (issue #199)."
+    },
+    {
+      "ordinal": 65,
+      "name": "MaterialPassport",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "Material passport keyed by a 32-byte material ID."
+    },
+    {
+      "ordinal": 66,
+      "name": "AllMaterialIds",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "All material IDs registered (packed 32-byte chunks)."
+    },
+    {
+      "ordinal": 67,
+      "name": "MaterialLoopEvents",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "Loop events for a material, stored as a Vec<LoopEvent>."
+    },
+    {
+      "ordinal": 68,
+      "name": "CircularitySnapshot",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "u32" }
+      ],
+      "tombstone": false,
+      "comment": "Circularity snapshot keyed by ledger sequence (u32)."
+    },
+    {
+      "ordinal": 69,
+      "name": "CircularitySnapshotCount",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Total number of circularity snapshots taken."
+    },
+    {
+      "ordinal": 70,
+      "name": "CircularityTotals",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Running totals for circularity metric aggregates."
+    },
+    {
+      "ordinal": 71,
+      "name": "LcaProfile",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "LCA profile keyed by product ID (32-byte content-addressed)."
+    },
+    {
+      "ordinal": 72,
+      "name": "LcaPhaseImpact",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" },
+        { "position": 1, "name": null, "type": "u32" }
+      ],
+      "tombstone": false,
+      "comment": "Phase impacts stored per (product_id, phase_discriminant)."
+    },
+    {
+      "ordinal": 73,
+      "name": "LcaResult",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "Finalized LCA result (aggregated across all phases)."
+    },
+    {
+      "ordinal": 74,
+      "name": "LcaNormRef",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": false,
+      "comment": "Normalization reference values set keyed by a short name Symbol."
+    },
+    {
+      "ordinal": 75,
+      "name": "LcaWeightingScheme",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "Symbol" }
+      ],
+      "tombstone": false,
+      "comment": "Weighting scheme keyed by a short name Symbol."
+    },
+    {
+      "ordinal": 76,
+      "name": "LcaUncertainty",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "Uncertainty bounds (interval arithmetic) for a product's aggregated impacts."
+    },
+    {
+      "ordinal": 77,
+      "name": "LcaDbEntry",
+      "kind": "tuple",
+      "fields": [
+        { "position": 0, "name": null, "type": "BytesN<32>" }
+      ],
+      "tombstone": false,
+      "comment": "LCA database entry keyed by a 32-byte reference ID."
+    },
+    {
+      "ordinal": 78,
+      "name": "LcaProfileCount",
+      "kind": "unit",
+      "fields": [],
+      "tombstone": false,
+      "comment": "Total number of LCA profiles registered."
+    }
+  ]
+}

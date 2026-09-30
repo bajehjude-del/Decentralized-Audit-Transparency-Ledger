@@ -30,7 +30,7 @@ A version's lifecycle is `active → deprecated → sunset`:
 | v0      | deprecated | 2023-01-01  | 2025-01-01  | 2027-01-01   | v1        |
 
 * **Deprecated** — the version still serves traffic and works exactly as
-  before, but responses carry `Deprecation: true` and `Sunset: <date>` headers
+  before, but responses carry `Deprecation: true` and `Sunset: <date>`` headers
   (RFC 8594) plus a `Link: <next>; rel="successor-version"` header.
 * **Sunset** — after the sunset date the version stops being served and
   requests receive `410 Gone` with the successor and this migration guide.

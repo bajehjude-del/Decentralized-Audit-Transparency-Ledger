@@ -1,0 +1,27 @@
+specVersion: 0.0.4
+description: The Graph subgraph for the Decentralized Audit & Transparency Ledger (AuditLedger) Soroban contract.
+dataFonts:
+  - kind: ethereum
+    network: stellar-testnet
+    source:
+      address: "<AUDIT_LEDGER_CONTRACT_ID>"
+      abis: ./abis/AuditLedger.json
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.6
+      language: wasm/assemblyscript
+      file: ./src/mapping.ts
+      handlers:
+        - event: EventLogged(index uint64, eventType string, submitter string, metadata string, eventHash string, prevHash string, timestamp uint64)
+          handler: handleEventLogged
+        - event: EventUpdated(index uint64, eventType string, submitter string, metadata string, eventHash string, prevHash string, timestamp uint64)
+          handler: handleEventUpdated
+        - event: EventRolledBack(index uint64, eventType string, submitter string, metadata string, eventHash string, prevHash string, timestamp uint64)
+          handler: handleEventRolledBack
+        - event: GovernanceAction(action string, caller string, oldValue string, newValue string, approvedBy string[], requiredApprovals uint32, timestamp uint64)
+          handler: handleGovernanceAction
+        - event: SnapshotTaken(id string, eventCount uint64, hash string, timestamp uint64)
+          handler: handleSnapshotTaken
+        - event: ArchivedEvent(index uint64, archiveHash string, timestamp uint64)
+          handler: handleArchivedEvent

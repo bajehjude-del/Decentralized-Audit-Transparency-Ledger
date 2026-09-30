@@ -1,12 +1,24 @@
 import { PubSub, withFilter } from "graphql-subscriptions";
 import { requireRole, Role } from "./auth";
 import { deliverEvent } from "../../rest/src/webhooks";
+import { DataLoader } from "./dataloader";
+import {
+  assignRole,
+  getCaps,
+  getRoleAssignments,
+  listGovernanceRecords,
+  recordGovernanceAction,
+  removeEventCap,
+ revokeRole,
+  setEventCap,
+  setGlobalCap,
+} from "./governance";
 
 export const pubsub = new PubSub();
 export const EVENT_LOGGED = "EVENT_LOGGED";
 
 // In-memory mock store (replace with JS SDK calls in production)
-interface EventRecord {
+export interface EventRecord {
   id: string;
   index: number;
   timestamp: number;
@@ -17,16 +29,26 @@ interface EventRecord {
   prev_hash: string;
 }
 
-interface GovernanceEventRecord {
-  action: string;
-  caller: string;
-  oldValue?: string;
-  newValue?: string;
-  timestamp: number;
+const events: EventRecord[] = [];
+
+export type EventLoader = DataLoader<string, EventRecord | null>;
+export type SubmitterEventLoader = DataLoader<string, EventRecord[]>;
+
+export interface EventLoaders {
+  byId: EventLoader;
+  bySubmitter: SubmitterEventLoader;
 }
 
-const events: EventRecord[] = [];
-const governanceEvents: GovernanceEventRecord[] = [];
+export function createEventLoaders(source: readonly EventRecord[] = events): EventLoaders {
+  return {
+    byId: new DataLoader<string, EventRecord | null>(async (ids) =>
+      ids.map((id) => source.find((event) => event.id === id) ?? null)
+    ),
+    bySubmitter: new DataLoader<string, EventRecord[]>(async (submitters) =>
+      submitters.map((submitter) => source.filter((event) => event.submitter === submitter))
+    ),
+  };
+}
 
 function matchesFilter(e: EventRecord, filter: any): boolean {
   if (!filter) return true;
@@ -68,17 +90,28 @@ export const resolvers = {
       for (const e of events) {
         byType[e.event_type] = (byType[e.event_type] ?? 0) + 1;
       }
-      return { totalEvents: events.length, globalMaxLogs: 100000, eventsByType: byType };
+      return { totalEvents: events.length, globalMaxLogs: getCaps().globalMaxLogs, eventsByType: byType };
     },
 
     searchEvents: (_: any, { query }: any) =>
       events.filter((e) => e.metadata.toLowerCase().includes(query.toLowerCase())),
 
-    governanceHistory: (_: any, { types, limit = 50, offset = 0 }: any) => {
-      const filtered = types && types.length > 0
-        ? governanceEvents.filter((g) => types.includes(g.action))
-        : governanceEvents;
-      return filtered.slice(offset, offset + limit);
+    governanceHistory: (_: any, { types, limit = 50, offset = 0 }: any) =>
+      listGovernanceRecords(types, limit, offset),
+
+    roleAssignments: (_: any, __: any, ctx: any) => {
+      requireRole(ctx, Role.Admin);
+      return getRoleAssignments();
+    },
+
+    caps: (_: any, __: any, ctx: any) => {
+      requireRole(ctx, Role.Admin);
+      return getCaps();
+    },
+
+    governanceRecords: (_: any, { types, limit = 50, offset = 0 }: any, ctx: any) => {
+      requireRole(ctx, Role.Auditor);
+      return listGovernanceRecords(types, limit, offset);
     },
 
     _service: () => ({ sdl: typeDefs }),
@@ -90,6 +123,14 @@ export const resolvers = {
 
   Event: {
     __resolveReference: (reference: { id: string }) => events.find((event) => event.id === reference.id) ?? null,
+
+    relatedEvents: async (event: EventRecord, { type, limit = 10 }: any, ctx: any) => {
+      const loaders = ctx?.eventLoaders ?? createEventLoaders();
+      const related = await loaders.bySubmitter.load(event.submitter);
+      return related
+        .filter((candidate) => candidate.id !== event.id && (!type || candidate.event_type === type))
+        .slice(0, Math.max(0, limit));
+    },
   },
 
   Mutation: {
@@ -121,15 +162,37 @@ export const resolvers = {
         "remove_event_cap", "contract_paused", "contract_unpaused",
       ]);
       if (GOVERNANCE_TYPES.has(eventType)) {
-        governanceEvents.unshift({
-          action: eventType,
-          caller: submitter,
-          newValue: metadata || undefined,
-          timestamp: now,
-        });
+        recordGovernanceAction({ action: eventType, caller: submitter, newValue: metadata || undefined });
       }
 
       return ev;
+    },
+
+    assignRole: (_: any, { address, role }: { address: string; role: Role }, ctx: any) => {
+      requireRole(ctx, Role.Admin);
+      return assignRole(address, role, ctx.address ?? ctx.adminAddress ?? "governance");
+    },
+
+    revokeRole: (_: any, { address }: { address: string }, ctx: any) => {
+      requireRole(ctx, Role.Admin);
+      return revokeRole(address, ctx.address ?? ctx.adminAddress ?? "governance");
+    },
+
+    setCap: (_: any, { input }: { input: { globalMaxLogs?: number; eventType?: string; eventMaxLogs?: number } }, ctx: any) => {
+      requireRole(ctx, Role.Admin);
+      const caller = ctx.address ?? ctx.adminAddress ?? "governance";
+      if (input.globalMaxLogs != null) {
+        setGlobalCap(input.globalMaxLogs, caller);
+      }
+      if (input.eventType && input.eventMaxLogs != null) {
+        setEventCap(input.eventType, input.eventMaxLogs, caller);
+      }
+      return getCaps();
+    },
+
+    removeEventCap: (_: any, { eventType }: { eventType: string }, ctx: any) => {
+      requireRole(ctx, Role.Admin);
+      return removeEventCap(eventType, ctx.address ?? ctx.adminAddress ?? "governance");
     },
   },
 

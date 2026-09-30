@@ -64,15 +64,15 @@ pub fn compute_report_id(
     buf.append(entity_bytes);
     buf.extend_from_array(&period_start.to_le_bytes());
     buf.extend_from_array(&period_end.to_le_bytes());
-    env.crypto().sha256(&buf)
+    env.crypto().sha256(&buf).to_bytes()
 }
 
 /// Compute report content hash: SHA-256 of `prev_report_hash || content`.
 pub fn compute_report_hash(env: &Env, prev_report_hash: &BytesN<32>, content: &Bytes) -> BytesN<32> {
     let mut buf = Bytes::new(env);
-    buf.append(&Bytes::from_slice(env, prev_report_hash.as_ref()));
+    buf.append(&prev_report_hash.to_bytes());
     buf.append(content);
-    env.crypto().sha256(&buf)
+    env.crypto().sha256(&buf).to_bytes()
 }
 
 /// Build an empty `ValidationResult` for a freshly generated report.
@@ -88,11 +88,11 @@ fn empty_validation(env: &Env, now: u64) -> ValidationResult {
 }
 
 /// Encode a KV tag as `key=value\n` bytes.
-fn kv(env: &Env, key: &[u8], value: &[u8]) -> Bytes {
+fn kv(env: &Env, key: &[u8], value: &Bytes) -> Bytes {
     let mut b = Bytes::new(env);
     b.extend_from_slice(key);
     b.extend_from_slice(b"=");
-    b.extend_from_slice(value);
+    b.append(value);
     b.extend_from_slice(b"\n");
     b
 }
@@ -113,9 +113,9 @@ impl FinraGenerators {
     pub fn oats(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"FINRA"));
-        content.append(&kv(env, b"form", b"OATS"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"FINRA")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"OATS")));
+        content.append(&kv(env, b"lei", &input.lei));
         // period_start encoded as raw LE bytes
         let mut ps = Bytes::new(env);
         ps.extend_from_slice(b"period_start=");
@@ -149,7 +149,7 @@ impl FinraGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -162,9 +162,9 @@ impl FinraGenerators {
     pub fn cat(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"FINRA"));
-        content.append(&kv(env, b"form", b"CAT"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"FINRA")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"CAT")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -192,7 +192,7 @@ impl FinraGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -203,9 +203,9 @@ impl FinraGenerators {
     pub fn rule_4370(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"FINRA"));
-        content.append(&kv(env, b"form", b"Rule4370"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"FINRA")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"Rule4370")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -233,7 +233,7 @@ impl FinraGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -254,9 +254,9 @@ impl SecGenerators {
     pub fn form_adv(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"SEC"));
-        content.append(&kv(env, b"form", b"ADV"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"SEC")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"ADV")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -284,7 +284,7 @@ impl SecGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -297,9 +297,9 @@ impl SecGenerators {
     pub fn form_pf(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"SEC"));
-        content.append(&kv(env, b"form", b"PF"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"SEC")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"PF")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -327,7 +327,7 @@ impl SecGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -340,9 +340,9 @@ impl SecGenerators {
     pub fn form_13f(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"SEC"));
-        content.append(&kv(env, b"form", b"13F"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"SEC")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"13F")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -370,7 +370,7 @@ impl SecGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -391,9 +391,9 @@ impl CftcGenerators {
     pub fn large_trader(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"CFTC"));
-        content.append(&kv(env, b"form", b"LargeTrader"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"CFTC")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"LargeTrader")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -421,7 +421,7 @@ impl CftcGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -434,9 +434,9 @@ impl CftcGenerators {
     pub fn swap_data(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"CFTC"));
-        content.append(&kv(env, b"form", b"SwapData"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"CFTC")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"SwapData")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -464,7 +464,7 @@ impl CftcGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -485,9 +485,9 @@ impl FcaGenerators {
     pub fn mifid_ii(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"FCA"));
-        content.append(&kv(env, b"form", b"MiFIDII"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"FCA")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"MiFIDII")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -515,7 +515,7 @@ impl FcaGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -528,9 +528,9 @@ impl FcaGenerators {
     pub fn emir(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"FCA"));
-        content.append(&kv(env, b"form", b"EMIR"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"FCA")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"EMIR")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -558,7 +558,7 @@ impl FcaGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -579,9 +579,9 @@ impl BaFinGenerators {
     pub fn wphg(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"BaFin"));
-        content.append(&kv(env, b"form", b"WpHG"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"BaFin")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"WpHG")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -609,7 +609,7 @@ impl BaFinGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -622,9 +622,9 @@ impl BaFinGenerators {
     pub fn anacredit(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"BaFin"));
-        content.append(&kv(env, b"form", b"AnaCredit"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"BaFin")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"AnaCredit")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -652,7 +652,7 @@ impl BaFinGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -673,9 +673,9 @@ impl MasGenerators {
     pub fn trr(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"MAS"));
-        content.append(&kv(env, b"form", b"TRR"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"MAS")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"TRR")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -703,7 +703,7 @@ impl MasGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -716,9 +716,9 @@ impl MasGenerators {
     pub fn form_610(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"MAS"));
-        content.append(&kv(env, b"form", b"Form610"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"MAS")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"Form610")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -746,7 +746,7 @@ impl MasGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -767,9 +767,9 @@ impl MiCaGenerators {
     pub fn casp(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"MiCA"));
-        content.append(&kv(env, b"form", b"CASP"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"MiCA")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"CASP")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -797,7 +797,7 @@ impl MiCaGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -811,9 +811,9 @@ impl MiCaGenerators {
     pub fn reserve_asset(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"MiCA"));
-        content.append(&kv(env, b"form", b"ReserveAsset"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"MiCA")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"ReserveAsset")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -841,7 +841,7 @@ impl MiCaGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -854,9 +854,9 @@ impl MiCaGenerators {
     pub fn white_paper(input: &ReportInput<'_>, now: u64) -> RegulatoryReport {
         let env = input.env;
         let mut content = Bytes::new(env);
-        content.append(&kv(env, b"authority", b"MiCA"));
-        content.append(&kv(env, b"form", b"WhitePaper"));
-        content.append(&kv(env, b"lei", input.lei.as_ref()));
+        content.append(&kv(env, b"authority", &Bytes::from_slice(env, b"MiCA")));
+        content.append(&kv(env, b"form", &Bytes::from_slice(env, b"WhitePaper")));
+        content.append(&kv(env, b"lei", &input.lei));
         content.append(&input.extra_fields);
 
         let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -884,7 +884,7 @@ impl MiCaGenerators {
             status: ReportStatus::Draft,
             created_at: now,
             updated_at: now,
-            last_validation: Some(empty_validation(env, now)),
+            last_validation: empty_validation(env, now),
             prev_report_hash: input.prev_report_hash.clone(),
             report_hash,
             source_event_ids: input.source_event_ids.clone(),
@@ -935,8 +935,8 @@ pub fn generate_report(
         _ => {
             let env = input.env;
             let mut content = Bytes::new(env);
-            content.append(&kv(env, b"form", b"Generic"));
-            content.append(&kv(env, b"lei", input.lei.as_ref()));
+            content.append(&kv(env, b"form", &Bytes::from_slice(env, b"Generic")));
+            content.append(&kv(env, b"lei", &input.lei));
             content.append(&input.extra_fields);
 
             let entity_bytes = Bytes::from_slice(env, &[0u8; 32]);
@@ -964,7 +964,7 @@ pub fn generate_report(
                 status: ReportStatus::Draft,
                 created_at: now,
                 updated_at: now,
-                last_validation: Some(empty_validation(env, now)),
+                last_validation: empty_validation(env, now),
                 prev_report_hash: input.prev_report_hash.clone(),
                 report_hash,
                 source_event_ids: input.source_event_ids.clone(),
