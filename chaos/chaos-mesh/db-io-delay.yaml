@@ -1,0 +1,18 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: IOChaos
+metadata:
+  name: db-io-delay
+  namespace: audit-ledger
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - audit-ledger
+    labelSelectors:
+      app.kubernetes.io/name: audit-ledger-db
+  volumePath: /var/lib/postgresql/data
+  path: ""
+  delay: 2000ms
+  percent: 100
+  duration: 45s
