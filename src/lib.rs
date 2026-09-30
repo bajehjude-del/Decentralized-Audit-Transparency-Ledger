@@ -94,7 +94,20 @@ mod cqrs_tests;
 #[cfg(test)]
 mod pause_granular_tests;
 
+// Confidential event metadata and access control policies (issue #401)
+pub mod confidential_metadata;
+
+#[cfg(test)]
+mod confidential_metadata_tests;
+
+// Event aggregation pipelines and materialized views (issue #396)
+pub mod event_aggregation;
+
+#[cfg(test)]
+mod event_aggregation_tests;
+
 pub use cqrs::*;
+
 
 /// Zero/invalid Stellar address (all zeroes) used to reject `NewOwnerIsZero`.
 const NULL_ACCOUNT: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";

@@ -27,7 +27,9 @@
 pub mod client;
 pub mod models;
 pub mod errors;
+pub mod iterators;
 
 pub use client::Client;
 pub use models::*;
 pub use errors::Error;
+pub use iterators::EventIteratorExt;

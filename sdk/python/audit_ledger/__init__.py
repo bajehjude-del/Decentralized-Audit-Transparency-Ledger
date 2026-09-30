@@ -81,12 +81,34 @@ from .validation import (
     validate_event,
     BASE_EVENT_SCHEMA,
 )
+from .async_streaming import (
+    async_stream_events,
+    async_stream_by_type,
+    AsyncEventBatcher,
+)
+from .confidential import (
+    AccessControlPolicy,
+    AccessControlPolicyType,
+    ConfidentialEventPayload,
+    ConfidentialMetadataHelper,
+)
+
+
 
 __all__ = [
     # Sync client
     "AuditLedgerClient",
     # Async client (#242)
     "AsyncAuditLedgerClient",
+    # Async streaming & batching (#392)
+    "async_stream_events",
+    "async_stream_by_type",
+    "AsyncEventBatcher",
+    # Confidential metadata (#401)
+    "AccessControlPolicy",
+    "AccessControlPolicyType",
+    "ConfidentialEventPayload",
+    "ConfidentialMetadataHelper",
     # Models
     "Event",
     "Page",

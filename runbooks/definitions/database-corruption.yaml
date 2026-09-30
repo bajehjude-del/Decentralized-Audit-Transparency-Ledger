@@ -1,0 +1,41 @@
+apiVersion: runbooks.audit-ledger.io/v1
+kind: OperationalRunbook
+metadata:
+  id: RB-007-DATABASE-CORRUPTION
+  name: Database Corruption Recovery & Snapshot Restore
+  version: 1.0.0
+spec:
+  type: DATABASE_RESTORE
+  author: Data Infrastructure & SRE Team
+  description: "Detect off-chain database index/storage corruption, isolate corrupt instance, and execute point-in-time recovery from validated ledger replay snapshot"
+  preconditions:
+    - check: db_read_write_error_rate
+      errorThresholdPercent: 50
+    - check: latest_verified_snapshot_available
+      maxAgeMinutes: 60
+  steps:
+    - id: 1
+      name: "Quarantine Corrupt Database Node from Service Pool"
+      isIdempotent: true
+      timeoutSeconds: 20
+      action: "remove_node_from_read_replica_pool"
+    - id: 2
+      name: "Download Latest Immutable Snapshot from S3 Backup Store"
+      isIdempotent: true
+      timeoutSeconds: 120
+      action: "fetch_verified_s3_snapshot"
+    - id: 3
+      name: "Restore Database Filesystem & Validate Cryptographic Checksum"
+      isIdempotent: true
+      timeoutSeconds: 180
+      action: "restore_snapshot_and_verify_sha256"
+    - id: 4
+      name: "Replay Delta Events from Soroban On-Chain Ledger to Head"
+      isIdempotent: true
+      timeoutSeconds: 120
+      action: "replay_missing_ledgers_from_contract"
+    - id: 5
+      name: "Verify Consistency Hash-Chain and Re-admit Node"
+      isIdempotent: true
+      timeoutSeconds: 30
+      action: "verify_hash_chain_and_rejoin_pool"

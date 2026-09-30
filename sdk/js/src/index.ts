@@ -5,3 +5,11 @@ export * from './validator';
 export * from './subscriptions';
 export * from './batch';
 export * from './verification';
+export * from './event-batcher';
+export * from './event-stream';
+export * from './reactive';
+export * from './filter-composition';
+export * from './connection-pool';
+export * from './metrics';
+export * from './confidential';
+

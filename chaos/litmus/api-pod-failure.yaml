@@ -1,0 +1,22 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: api-pod-failure-chaos
+  namespace: audit-ledger
+spec:
+  appinfo:
+    appns: audit-ledger
+    applabel: app.kubernetes.io/name=audit-ledger-api
+    appkind: deployment
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-delete
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: "45"
+            - name: CHAOS_INTERVAL
+              value: "15"
+            - name: FORCE
+              value: "true"

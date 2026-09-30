@@ -1,0 +1,42 @@
+apiVersion: runbooks.audit-ledger.io/v1
+kind: OperationalRunbook
+metadata:
+  id: RB-008-MONITORING-STACK-OUTAGE
+  name: Monitoring Stack & Telemetry Pipeline Outage Recovery
+  version: 1.0.0
+spec:
+  type: MONITORING_RECOVERY
+  author: SRE & Observability Team
+  description: "Recover Prometheus, Grafana, Alertmanager, or metrics-exporter pipeline during failure with standby telemetry failover"
+  preconditions:
+    - check: prometheus_scrape_health
+      failedScrapes: 5
+    - check: standby_monitoring_cluster_ready
+      status: "ready"
+  steps:
+    - id: 1
+      name: "Identify Failing Component (Prometheus / Grafana / Exporter)"
+      isIdempotent: true
+      timeoutSeconds: 20
+      action: "diagnose_observability_pipeline"
+    - id: 2
+      name: "Activate Standby Metrics Exporter Sidecar"
+      isIdempotent: true
+      timeoutSeconds: 30
+      action: "start_standby_metrics_exporter"
+    - id: 3
+      name: "Switch Alerting Routing to Secondary Alertmanager Cluster"
+      isIdempotent: true
+      timeoutSeconds: 25
+      action: "failover_alertmanager_routes"
+      rollback: "restore_primary_alertmanager_routes"
+    - id: 4
+      name: "Restart / Recreate Primary Prometheus StatefulSet"
+      isIdempotent: true
+      timeoutSeconds: 90
+      action: "restart_prometheus_instance"
+    - id: 5
+      name: "Verify Telemetry Ingestion and Close Incident"
+      isIdempotent: true
+      timeoutSeconds: 30
+      action: "assert_telemetry_flow_restored"

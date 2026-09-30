@@ -1,0 +1,42 @@
+apiVersion: runbooks.audit-ledger.io/v1
+kind: OperationalRunbook
+metadata:
+  id: RB-005-CONTRACT-UPGRADE-FAILURE
+  name: Smart Contract Upgrade Failure Rollback & Recovery
+  version: 1.0.0
+spec:
+  type: CONTRACT_UPGRADE_RECOVERY
+  author: Smart Contract Operations & Security Team
+  description: "Detect failed Soroban contract WASM upgrades, freeze execution, and execute safe rollback to previous verified WASM bytecode"
+  preconditions:
+    - check: upgrade_transaction_reverted_or_state_inconsistency
+      maxLedgersPostUpgrade: 10
+    - check: previous_wasm_hash_verified_in_registry
+      mustExist: true
+  steps:
+    - id: 1
+      name: "Verify Upgrade Failure and Freeze Contract Writes"
+      isIdempotent: true
+      timeoutSeconds: 30
+      action: "soroban_assert_upgrade_failed_and_pause_writes"
+      rollback: "soroban_unpause_writes"
+    - id: 2
+      name: "Validate Storage Layout Compatibility"
+      isIdempotent: true
+      timeoutSeconds: 45
+      action: "validate_storage_layout_diff_against_pre_upgrade_snapshot"
+    - id: 3
+      name: "Execute WASM Bytecode Rollback to Previous Stable Hash"
+      isIdempotent: true
+      timeoutSeconds: 60
+      action: "soroban_upgrade_contract_to_previous_wasm_hash"
+    - id: 4
+      name: "Re-run Sanity Diagnostics & Ledger Read/Write Tests"
+      isIdempotent: true
+      timeoutSeconds: 60
+      action: "run_contract_smoke_tests"
+    - id: 5
+      name: "Unpause Contract & Broadcast Incident Recovery Notification"
+      isIdempotent: true
+      timeoutSeconds: 30
+      action: "soroban_unpause_contract_and_publish_recovery_event"
