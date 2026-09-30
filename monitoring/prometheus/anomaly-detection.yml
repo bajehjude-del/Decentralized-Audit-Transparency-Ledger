@@ -1,0 +1,406 @@
+---
+# Prometheus alerting rules for advanced anomaly detection
+# Contract metrics, API performance, and system health
+groups:
+  - name: contract_anomaly_detection
+    interval: 30s
+    rules:
+      - alert: ContractEventRateAnomaly
+        expr: |
+          abs(
+            sum by (event_type) (rate(contract_events_total[5m]))
+            -
+            avg_over_time(
+              sum by (event_type) (rate(contract_events_total[5m]))
+              [1h]
+            )
+          )
+          >
+          3 * stddev_over_time(
+            sum by (event_type) (rate(contract_events_total[5m]))
+            [1h]
+          )
+        for: 5m
+        labels:
+          severity: warning
+          component: contract
+          detection_type: statistical
+        annotations:
+          summary: "Contract event rate anomaly for {{ $labels.event_type }}"
+          description: "Event rate for {{ $labels.event_type }} deviates more than 3 sigma from 1hbaseline"
+          runbook_url: "https://runbooks.example.com/contract-event-rate-anomaly"
+
+      - alert: ContractEventRateSpike
+        expr: |
+          sum by (event_type) (rate(contract_events_total[5m]))
+          >
+          5 * avg_over_time(
+            sum by (event_type) (rate(contract_events_total[5m]))
+            [1h]
+          )
+        for: 2m
+        labels:
+          severity: critical
+          component: contract
+          detection_type: threshold
+        annotations:
+          summary: "Contract event rate spike for {{ $labels.event_type }}"
+          description: "Event rate is 5x above 1h average for {{ $labels.event_type }}"
+          runbook_url: "https://runbooks.example.com/contract-event-spike"
+
+      - alert: ContractGasUsageAnomaly
+        expr: |
+          abs(
+            avg by (event_type) (rate(contract_gas_used_total[5m]))
+            -
+            avg_over_time(
+              avg by (event_type) (rate(contract_gas_used_total[5m]))
+              [12h
+            )
+          )
+          >
+          2.5 * stddev_over_time(
+            avg by (event_type) (rate(contract_gas_used_total[5m]))
+            [12h]
+          )
+        for: 10m
+        labels:
+          severity: warning
+          component: contract
+          detection_type: statistical
+        annotations:
+          summary: "Gas usage anomaly for {{ $labels.event_type }}"
+          description: "Gas usage per event type deviates from 12h pattern"
+          runbook_url: "https://runbooks.example.com/gas-usage-anomaly"
+
+      - alert: ContractGasUsageSpike
+        expr: |
+          avg by (event_type) (rate(contract_gas_used_total[5m]))
+          >
+          3 * avg_over_time(
+            avg by (event_type) (rate(contract_gas_used_total[5m]))
+            [24h]
+          )
+        for: 5m
+        labels:
+          severity: critical
+          component: contract
+          detection_type: threshold
+        annotations:
+          summary: "Gas usage spike for {{ $labels.event_type }}"
+          description: "Gas usage is 3x above 24h average for {{ $labels.event_type }}"
+          runbook_url: "https://runbooks.example.com/gas-spike"
+
+      - alert: ContractErrorRateAnomaly
+        expr: |
+          abs(
+            sum by (event_type) (rate(contract_errors_total[5m]))
+            /
+            sum by (event_type) (rate(contract_events_total[5m]))
+            -
+            avg_over_time(
+              sum by (event_type) (rate(contract_errors_total[5m]))
+              /
+              sum by (event_type) (rate(contract_events_total[5m]))
+              [1h
+            )
+          )
+          >
+          0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: contract
+          detection_type: statistical
+        annotations:
+          summary: "Contract error rate anomaly for {{ $labels.event_type }}"
+          description: "Error rate deviates more than 5% from 1h baseline"
+          runbook_url: "https://runbooks.example.com/contract-error-rate"
+
+      - alert: ContractErrorRateHigh
+        expr: |
+          sum by (event_type) (rate(contract_errors_total[5m]))
+          /
+          sum by (event_type) (rate(contract_events_total[5m]))
+          > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          component: contract
+          detection_type: threshold
+        annotations:
+          summary: "High contract error rate for {{ $labels.event_type }}"
+          description: "Error rate exceeds 10% for {{ $labels.event_type }}"
+          runbook_url: "https://runbooks.example.com/contract-error-high"
+
+  - name: api_anomaly_detection
+    interval: 30s
+    rules:
+      - alert: APILatencyAnomaly
+        expr: |
+          abs(
+            histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m]))
+            -
+            avg_over_time(
+              histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m]))
+              [1h
+            )
+          )
+          >
+          2 * stddev_over_time(
+            histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m]))
+            [1h]
+          )
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+          detection_type: statistical
+        annotations:
+          summary: "API latency anomaly on {{ $labels.endpoint }}"
+          description: "P95 latency deviates more than 2 sigma from 1h baseline"
+          runbook_url: "https://runbooks.example.com/api-latency-anomaly"
+
+      - alert: APILatencyHigh
+        expr: |
+          histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m]))
+          > 2
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+          detection_type: threshold
+        annotations:
+          summary: "High API latency on {{ $labels.endpoint }}"
+          description: "P95 latency exceeds 2s for {{ $labels.endpoint }}"
+          runbook_url: "https://runbooks.example.com/api-latency-high"
+
+      - alert: APIErrorRateAnomaly
+        expr: |
+          abs(
+            sum by (endpoint) (rate(api_requests_total{status=~"5{..}"}[5m]))
+            /
+            sum by (endpoint) (rate(api_requests_total[5m]))
+            -
+            avg_over_time(
+              sum by (endpoint) (rate(api_requests_total{status=~"5{..}"}[5m]))
+              /
+              sum by (endpoint) (rate(api_requests_total[5m]))
+              [1h]
+            )
+          )
+          > 0.03
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+          detection_type: statistical
+        annotations:
+          summary: "API error rate anomaly on {{ $labels.endpoint }}"
+          description: "5xx error rate deviates more than 3% from 1h baseline"
+          runbook_url: "https://runbooks.example.com/api-error-anomaly"
+
+      - alert: APIErrorRateHigh
+        expr: |
+          sum by (endpoint) (rate(api_requests_total{status=~"5{..}"}[5m]))
+          /
+          sum by (endpoint) (rate(api_requests_total[5m]))
+          > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+          detection_type: threshold
+        annotations:
+          summary: "High API error rate on {{ $labels.endpoint }}"
+          description: "5xx error rate exceeds 5% for {{ $labels.endpoint }}"
+          runbook_url: "https://runbooks.example.com/api-error-high"
+
+      - alert: APIThroughputAnomaly
+        expr: |
+          abs(
+            sum rate(api_requests_total[5m])
+            -
+            avg_over_time(sum rate(api_requests_total[5m]), [1h])
+          )
+          >
+          3 * stddev_over_time(sum rate(api_requests_total[5m]), [1h])
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+          detection_type: statistical
+        annotations:
+          summary: "API throughput anomaly"
+          description: "Request throughput deviates more than 3 sigma from 1h baseline"
+          runbook_url: "https://runbooks.example.com/api-throughput-anomaly"
+
+  - name: system_health_anomaly_detection
+    interval: 30s
+    rules:
+      - alert: SystemCPUAnomaly
+        expr: |
+          abs(
+            avg by (instance) (1 - avg rate(node_cpu_seconds_total{mode="idle"}[5m]))
+            -
+            avg_over_time(
+              avg by (instance) (1 - avg rate(node_cpu_seconds_total{mode="idle"}[5m]))
+              [1h
+            )
+          )
+          > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+          detection_type: statistical
+        annotations:
+          summary: "CPU anomaly on {{ $labels.instance }}"
+          description: "CPU usage deviates more than 20% from 1h baseline"
+          runbook_url: "https://runbooks.example.com/cpu-anomaly"
+
+      - alert: SystemMemoryAnomaly
+        expr: |
+          abs(
+            avg by (instance) (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+            -
+            avg_over_time(
+              avg by (instance) (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+              [1h]
+            )
+          )
+          > 0.15
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+          detection_type: statistical
+        annotations:
+          summary: "Memory anomaly on {{ $labels.instance }}"
+          description: "Memory usage deviates more than 15% from 1h baseline"
+          runbook_url: "https://runbooks.example.com/memory-anomaly"
+
+  - name: multi_dimensional_alerting
+    interval: 30s
+    rules:
+      - alert: EventVolumeAnomalyBySubmitter
+        expr: |
+          abs(
+            sum by (submitter) (rate(contract_events_total[5m]))
+            -
+            avg_over_time(
+              sum by (submitter) (rate(contract_events_total[5m]))
+              [1h]
+            )
+          )
+          >
+          3 * stddev_over_time(
+            sum by (submitter) (rate(contract_events_total[5m]))
+            [1h]
+          )
+        for: 5m
+        labels:
+          severity: warning
+          component: contract
+          detection_type: multi_dimensional
+        annotations:
+          summary: "Event volume anomaly for submitter {{ $labels.submitter }}"
+          description: "Submitter event rate deviates more than 3 sigma from 1h baseline"
+          runbook_url: "https://runbooks.example.com/submitter-anomaly"
+
+      - alert: EventVolumeAnomalyByHour
+        expr: |
+          abs(
+            sum by (hour) (rate(contract_events_total[5m]))
+            -
+            avg_over_time(
+              sum by (hour) (rate(contract_events_total[5m]))
+              [24h]
+            )
+          )
+          >
+          3 * stddev_over_time(
+            sum by (hour) (rate(contract_events_total[5m]))
+            [24h]
+          )
+        for: 10m
+        labels:
+          severity: warning
+          component: contract
+          detection_type: multi_dimensional
+        annotations:
+          summary: "Event volume anomaly during hour {{ $labels.hour }}"
+          description: "Event rate during hour {{ $labels.hour }} deviates from 24h pattern"
+          runbook_url: "https://runbooks.example.com/hourly-anomaly"
+
+      - alert: EventVolumeMLpredictionDeviation
+        expr: |
+          abs(
+            sum rate(contract_events_total[5m])
+            -
+            predict_linear
+              sum rate(contract_events_total[5m])
+              [1h]
+            )
+          )
+          >
+          0.2 * predict_linear
+            sum rate(contract_events_total[5m])
+            [1h]
+        for: 5m
+        labels:
+          severity: warning
+          component: contract
+          detection_type: ml_prediction
+        annotations:
+          summary: "Event volume deviates from ML prediction"
+          description: "Actual event volume deviates more than 20% from linear regression prediction"
+          runbook_url: "https://runbooks.example.com/ml-prediction-deviation"
+
+  - name: alert_routing_escalation
+    interval: 30s
+    rules:
+      - alert: CriticalAlertEscalation
+        expr: |
+          count_by (alertname, severity) (ALRERTS)
+          == 1
+        for: 15m
+        labels:
+          severity: critical
+          escalation_level: "2"
+        annotations:
+          summary: "Alert {{ $labels.alertname }} has been firing for 15 minutes"
+          description: "Escalating to on-call engineer due to sustained critical alert"
+          runbook_url: "https://runbooks.example.com/escalation"
+
+  - name: alert_deduplication_grouping
+    interval: 30s
+    rules:
+      - alert: HighAlertFatigue
+        expr: |
+          count_by (component) (ALERTS)
+          > 10
+        for: 5m
+        labels:
+          severity: info
+          component: alerting
+        annotations:
+          summary: "High alert fatigue in {{ $labels.component }}"
+          description: "More than 10 active alerts in component {{ $labels.component }} - consider grouping"
+          runbook_url: "https://runbooks.example.com/alert-fatigue"
+
+  - name: alert_silencing_inhibition
+    interval: 30s
+    rules:
+      - alert: InfrastructureOutageInhibition
+        expr: |
+          up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: infrastructure
+          inhibition: "true"
+        annotations:
+          summary: "Infrastructure outage detected"
+          description: "Target is down - inhibiting dependent alerts"
+          runbook_url: "https://runbooks.example.com/infra-outage"

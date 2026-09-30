@@ -46,7 +46,7 @@ groups:
           summary: "AuditLedger contract has been paused for > 30 minutes"
           description: >
             Contract {{ $labels.contract_id }} has been paused since
-            {{ with query (printf "audit_ledger_paused_since{contract_id=\"%s\"}" $labels.contract_id) }}{{ . | first | value | humanizeTimestamp }}{{ end }}.
+            {+ with query (printf "audit_ledger_paused_since{contract_id=\"%s\"}" $labels.contract_id) }{{ . | first | value | humanizeTimestamp }} {+ end }.
             All write operations are blocked.
           contract_id: "{{ $labels.contract_id }}"
           paused_since: "{{ with query (printf \"audit_ledger_paused_since{contract_id=\\\"%s\\\"}\" $labels.contract_id) }}{{ . | first | value }}{{ end }}"
@@ -96,3 +96,220 @@ groups:
             The hash chain integrity check for contract {{ $labels.contract_id }} has failed.
             This indicates possible data tampering or corruption. Immediate investigation required.
           contract_id: "{{ $labels.contract_id }}"
+
+  - name: audit_ledger_api
+    rules:
+      - alert: APIHighLatency
+        expr: histogram_quantile(0.95, rate(audit_ledger_api_request_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API request latency is high"
+          description: >
+            95th percentile API latency is {{ $value | printf "%.3f" }} s over the last 5 minutes
+            (threshold: 1s).
+
+      - alert: APICriticalLatency
+        expr: histogram_quantile(0.99, rate(audit_ledger_api_request_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API request latency is critically high"
+          description: >
+            99th percentile API latency is {{ $value | printf "%.3f" }} s over the last 5 minutes
+            (threshold: 5s).
+
+      - alert: APIHighErrorRate
+        expr: sum(rate(audit_ledger_api_requests_total{status=~5"..}[5m])) / sum(rate(audit_ledger_api_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API error rate is high"
+          description: >
+            API 5xx error rate is {{ $value | printf "%.2f" }} over the last 5 minutes
+            (threshold: 0.05).
+
+      - alert: APICriticalErrorRate
+        expr: sum(rate(audit_ledger_api_requests_total{status=~5..}[5m])) / sum(rate(audit_ledger_api_requests_total[5m])) > 0.25
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API error rate is critically high"
+          description: >
+            API 5xx error rate is {{ $value | printf "%.2f" }} over the last 5 minutes
+            (threshold: 0.25).
+
+      - alert: APIThroughputDrop
+        expr: sum(rate(audit_ledger_api_requests_total[5m])) < 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API throughput has dropped"
+          description: >
+            API throughput is {{ $value | printf "%.3f" }} requests/s over the last 5 minutes
+            (threshold: 0.1 requests/s).
+
+  - name: audit_ledger_anomaly
+    rules:
+      - alert: EventVolumeAnomaly
+        expr: >
+          abs(rate(audit_ledger_total_events[5m])
+          - avg_over_time(rate(audit_ledger_total_events[5m])[1h, 5m]))
+          > 3 * stddev_over_time(rate(audit_ledger_total_events[5m])[1h, 5m])
+        for: 5m
+        labels:
+          severity: warning
+          alert_type: anomaly
+        annotations:
+          summary: "Event volume anomaly detected"
+          description: >
+            Event rate deviates more than 3 standard deviations from the 1h
+            rolling mean. Current rate: {{ $value | printf "%.2f" }} events/s.
+
+      - alert: EventVolumeAnomalyByType
+        expr: >
+          abs(sum by (event_type) (rate(audit_ledger_events_total[5m]))
+          - avg_over_time(sum by (event_type) (rate(audit_ledger_events_total[5m]))[1h, 5m]))
+          > 3 * stddev_over_time(sum by (event_type) (rate(audit_ledger_events_total[5m]))[1h, 5m])
+        for: 5m
+        labels:
+          severity: warning
+          alert_type: anomaly
+        annotations:
+          summary: "Event volume anomaly for event type {{ $labels.event_type }}"
+          description: >
+            Event rate for event_type={{ $labels.event_type }} deviates more than 3
+            standard deviations from the 1h rolling mean.
+
+      - alert: GasUsageAnomaly
+        expr: >
+          abs(audit_ledger_avg_gas_cost
+          - avg_over_time(audit_ledger_avg_gas_cost[1h, 5m]))
+          > 3 * stddev_over_time(audit_ledger_avg_gas_cost[1h, 5m])
+        for: 10m
+        labels:
+          severity: warning
+          alert_type: anomaly
+        annotations:
+          summary: "Gas usage anomaly detected"
+          description: >
+            Average gas cost deviates more than 3 standard deviations from the 1h
+            rolling mean. Current avg gas cost: {{ $value | printf "%.0f" }} stroops.
+
+      - alert: GasUsageAnomalyByEventType
+        expr: >
+          abs(sum by (event_type) (audit_ledger_gas_cost_total)
+          - avg_over_time(sum by (event_type) (audit_ledger_gas_cost_total)[1h, 5m]))
+          > 3 * stddev_over_time(sum by (event_type) (audit_ledger_gas_cost_total)[1h, 5m])
+        for: 10m
+        labels:
+          severity: warning
+          alert_type: anomaly
+        annotations:
+          summary: "Gas usage anomaly for event type {{ $labels.event_type }}"
+          description: >
+            Gas cost for event_type={{ $labels.event_type }} deviates more than 3
+            standard deviations from the 1h rolling mean.
+
+      - alert: SubmitterEventVolumeAnomaly
+        expr: >
+          abs(sum by (submitter) (rate(audit_ledger_events_total[5m)))
+          - avg_over_time(sum by (submitter) (rate(audit_ledger_events_total[5m]))[1h, 5m]))
+          > 4 * stddev_over_time(sum by (submitter) (rate(audit_ledger_events_total[5m]))[1h, 5m])
+        for: 5m
+        labels:
+          severity: warning
+          alert_type: anomaly
+        annotations:
+          summary: "Submitter event volume anomaly for {{ $labels.submitter }}"
+          description: >
+            Event rate for submitter={{ $labels.submitter }} deviates more than 4
+            standard deviations from the 1h rolling mean.
+
+      - alert: EventRateSeasonalDeviation
+        expr: >
+          abs(rate(audit_ledger_total_events[5m])
+          - avg_over_time(rate(audit_ledger_total_events[5m])[24h, 5m]))
+          > 2 * stddev_over_time(rate(audit_ledger_total_events[5m])[24h, 5m])
+        for: 10m
+        labels:
+          severity: info
+          alert_type: anomaly
+        annotations:
+          summary: "Event rate deviates from 24h baseline"
+          description: >
+            Event rate deviates more than 2 standard deviations from the 24h
+            rolling mean.
+
+  - name: audit_ledger_system
+    rules:
+      - alert: MetricsExporterDown
+        expr: up({job="audit-ledger-metrics-exporter"}) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Metrics exporter is down"
+          description: "The metrics exporter target has been unreachable for over 2 minutes."
+
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus target {{ $labels.instance }} is down"
+          description: "Target {{ $labels.instance }} (job={{ $labels.job }}) has been down for over 5 minutes."
+
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes / process_virtual_memory_max_bytes > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Process memory usage is above 90% for over 10 minutes."
+
+      - alert: HighCPUSaturation
+        expr: avg by (instance) (rate(process_cpu_seconds_total[5m])) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU saturation on {{ $labels.instance }}"
+          description: "CPU usage is above 90% for over 10 minutes."
+
+  - name: audit_ledger_escalation
+    rules:
+      - alert: AuditLedgerCriticalEscalation
+        expr: >
+          count by (alertname) (ALRERTS{severity="critical", state="firing"})
+          > 0
+        for: 15m
+        labels:
+          severity: critical
+          escalation: tier2
+        annotations:
+          summary: "Critical alert {{ $labels.alertname }} unresolved for 15 minutes"
+          description: >
+            Alert {{ $labels.alertname }} has been firing for more than 15 minutes.
+            Escalating to tier 2 oncall.
+
+      - alert: AuditLedgerAnomalyEscalation
+        expr: >
+          count by (alertname) (ALERTS{alert_type="anomaly", severity="warning", state="firing"})
+          > 0
+        for: 30m
+        labels:
+          severity: warning
+          escalation: tier2
+        annotations:
+          summary: "Anomaly alert {{ $labels.alertname }} unresolved for 30 minutes"
+          description: >
+            Anomaly alert {{ $labels.alertname }} has been firing for more than 30
+            minutes. Escalating to tier 2 oncall.
